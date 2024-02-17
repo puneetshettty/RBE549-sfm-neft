@@ -1,5 +1,8 @@
+import sys
 import os
 import glob
+from pprint import pprint
+
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -150,7 +153,6 @@ from scipy.spatial.transform import Rotation
 def read_matching_file(files_path):
     txt_files = glob.glob(os.path.join(files_path, '*.txt'))
     png_files = glob.glob(os.path.join(files_path, '*.png'))
-    num_png_files = len(png_files)
     
     matches = {}  # Create an empty dictionary for matches
 
@@ -160,91 +162,62 @@ def read_matching_file(files_path):
             source_img = matches_path.split("matching")[1].split(".")[0]  # Get the source image number from the file name
             source_img = int(source_img)
 
-            for i in range(1, min(6, num_png_files - source_img + 1)):
-                key = f"{source_img}a{source_img + i}"  # Dynamically generate the key
-                matches[key] = set()
-
-            # Now you have a dictionary with keys like '1a2', '1a3', etc. for each source image
-            # You can use these keys to store the matches for each source image
-            # print(matches)  # Print for demonstration, you can replace this with your actual processing logic
-                
-
             with open(matches_path, 'r') as file:
                 i = 0
                 for line in file:
                     if i == 0:
                         num_features = int(line.split(':')[1].strip())
                         i += 1
-                    else:
-                        data = line.split(' ')
-                        feature_coords = [float(data[4]), float(data[5])]
-                        num_matches = int(data[0])
-                        num_pairs = num_matches - 1
+                        continue
+                    data = line.split(' ')
+                    feature_coords = [float(data[4]), float(data[5])]
+                    num_matches = int(data[0])
+                    num_pairs = num_matches - 1
 
-                        for j in range(num_pairs):
-                            img_id = int(data[6 + 3 * j])
-                            matches_coords = [float(data[6 + 3 * j + 1]), float(data[6 + 3 * j + 2])]
-                            feature_matches = (tuple(feature_coords), tuple(matches_coords))  # Create a tuple for each pair of matches
-                            key = f"{source_img}a{img_id}"
-                            matches[key].add(feature_matches)  # Append the matches to the list for the corresponding key
+                    img_ids = [source_img]
+                    matching_coords = [feature_coords]
 
-                            # # If there are more than 1 pair involved, create keys for combinations of all image pairs
-                            if num_pairs > 1:
-                                for comb in itertools.combinations(range(source_img + 1, min(6, source_img + num_png_files)), num_pairs):
-                                    comb_key = f"{source_img}a{'a'.join(str(c) for c in comb)}"
-                                    matches[comb_key] = set()
 
-            
-                    i += 1
-                    if i == 12:
-                        break
+                    for j in range(num_pairs):
+                        img_id = int(data[6 + 3 * j])
+                        matching_coord = [float(data[6 + 3 * j + 1]), float(data[6 + 3 * j + 2])]
+
+                        img_ids.append(img_id)
+                        matching_coords.append(matching_coord)
+
+                    # sort the matches according to image id
+                    # Makes sure that for a given combination, only one key is created
+                    img_ids, matching_coords = zip(*sorted(zip(img_ids, matching_coords))) 
+                    combinations = list(zip(img_ids, matching_coords))
+
+                    combinations_2 = list(itertools.combinations(combinations, 2))
+                    for x, y in combinations_2:
+                        key = f"{x[0]}a{y[0]}"
+                        if key in matches:
+                            matches[key].append((x[1], y[1]))
+                        else: 
+                            matches[key] = [(x[1], y[1])]
+
+                    if num_pairs > 1:
+                        combinations_3 = list(itertools.combinations(combinations, 3))
+                        
+                        # Only doing for 3 images
+                        for x,y,z in combinations_3:
+                            key = f"{x[0]}a{y[0]}a{z[0]}"
+
+                            if key in matches:
+                                matches[key].append((x[1], y[1], z[1]))
+                            else: 
+                                matches[key] = [(x[1], y[1], z[1])]
+
 
     return matches 
 
 
 # Example usage:
-files_path = '.\P3Data'
+files_path = os.path.normpath('P3Data')
+
 matches = read_matching_file(files_path)
-image_pairs = list(matches.keys())
-image_pairs_1 = [key for key in image_pairs if len(key) <= len('1a2')]
-print(image_pairs_1)
-# convert matches[key] to list
-for key in matches:
-    matches[key] = list(matches[key])
+pprint(matches)
 
-for key in image_pairs_1:
-    # print(f'key1: {key}')
-    for i in range(len(matches[key])):
-        m = matches[key][i][0]
-        targets = [matches[key][i][1]]
-        targets_id = []
-        source_img = int(key.split('a')[0])
-        for k, key1 in enumerate(image_pairs_1):
-            # print(k)
-            if k+1 < (len(image_pairs_1) - 1):            
-                for key2 in image_pairs_1[k+1:]:
-                    print(f'key1: {key1}')
-                    print(f'key2: {key2}')
-                    for j in range(len(matches[key2])):
-                        m1 = matches[key2][j][0]
-                        if m == m1:
-                            targets.append(matches[key2][j][1])
-                            targets_id.append(int(key2.split('a')[1]))
-
-
-        if len(targets) > 1:
-            comb_key = f"{source_img}a{'a'.join(str(id) for id in targets_id)}"
-            print(comb_key)
-            if comb_key in matches.keys():
-                matches[comb_key].append(targets)
-                # print(f'Made key {comb_key} with {len(targets)} targets')
-
-
-
-
-
-
-
-
-image_pairs = list(matches.keys())
-# print(len(matches['1a2a3']))
+pprint([(key, len(matches[key])) for key in matches])
