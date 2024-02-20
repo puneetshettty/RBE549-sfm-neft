@@ -3,6 +3,8 @@ import glob
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
+import itertools
+from pprint import pprint
 from GetInliersRANSAC import inlier_ransac
 from EssentialMatrixFromFundamentalMatrix import EssentialMatrixFromFundamentalMatrix
 from ExtractCameraPose import ExtractCameraPose
@@ -149,7 +151,6 @@ def plot_triangulation_comparison(X_linear, X_nonlinear, R1, C1, R2, C2, source,
 def read_matching_file(files_path):
     txt_files = glob.glob(os.path.join(files_path, '*.txt'))
     png_files = glob.glob(os.path.join(files_path, '*.png'))
-    num_png_files = len(png_files)
     
     matches = {}  # Create an empty dictionary for matches
 
@@ -159,49 +160,81 @@ def read_matching_file(files_path):
             source_img = matches_path.split("matching")[1].split(".")[0]  # Get the source image number from the file name
             source_img = int(source_img)
 
-            for i in range(1, num_png_files - source_img + 1):
-                key = f"{source_img}a{source_img + i}"  # Dynamically generate the key
-                matches[key] = []
-
-            # Now you have a dictionary with keys like '1a2', '1a3', etc. for each source image
-            # You can use these keys to store the matches for each source image
-            # print(matches)  # Print for demonstration, you can replace this with your actual processing logic
-                
-
             with open(matches_path, 'r') as file:
                 i = 0
+                l = 0
                 for line in file:
+                    l += 1
                     if i == 0:
                         num_features = int(line.split(':')[1].strip())
                         i += 1
-                    else:
-                        data = line.split(' ')
-                        feature_coords = [float(data[4]), float(data[5])]
-                        num_matches = int(data[0])
-                        num_pairs = num_matches - 1
+                        continue
+                    data = line.split(' ')
+                    feature_coords = (float(data[4]), float(data[5]))
+                    num_matches = int(data[0])
+                    num_pairs = num_matches - 1
 
-                        for j in range(num_pairs):
-                            img_id = int(data[6 + 3 * j])
-                            matches_coords = [float(data[6 + 3 * j + 1]), float(data[6 + 3 * j + 2])]
-                            feature_matches = [feature_coords, matches_coords]  # Create a new list for each pair of matches
-                            # feature_matches = {
-                            #     'coordinates': feature_coords,
-                            #     'index': j  # Assign index to each feature match
-                            # }
-                            key = f"{source_img}a{img_id}"
-                            matches[key].append(feature_matches)  # Append the matches to the list for the corresponding key
+                    img_ids = [source_img]
+                    matching_coords = [feature_coords]
 
-                    i += 1
-                    # if i == 11:
+
+                    for j in range(num_pairs):
+                        img_id = int(data[6 + 3 * j])
+                        matching_coord = (float(data[6 + 3 * j + 1]), float(data[6 + 3 * j + 2]))
+
+                        img_ids.append(img_id)
+                        matching_coords.append(matching_coord)
+
+                    # sort the matches according to image id
+                    # Makes sure that for a given combination, only one key is created
+                    img_ids, matching_coords = zip(*sorted(zip(img_ids, matching_coords))) 
+                    combinations = list(zip(img_ids, matching_coords))
+
+                    combinations_2 = list(itertools.combinations(combinations, 2))
+                    for x, y in combinations_2:
+                        key = f"{x[0]}a{y[0]}"
+                        if key in matches:
+                            matches[key].append((x[1], y[1]))
+                        else: 
+                            matches[key] = [(x[1], y[1])]
+
+                    if num_pairs > 1:
+                        combinations_3 = list(itertools.combinations(combinations, 3))
+                        
+                        # Only doing for 3 images
+                        for x,y,z in combinations_3:
+                            key = f"{x[0]}a{y[0]}a{z[0]}"
+
+                            if key in matches:
+                                matches[key].append((x[1], y[1], z[1]))
+                            else: 
+                                matches[key] = [(x[1], y[1], z[1])]
+                    # if l == 6:
                     #     break
-
     return matches 
 
 
 # Example usage:
-files_path = '.\P3Data'
+files_path = os.path.normpath('P3Data')
+
 matches = read_matching_file(files_path)
+
+
+# Convert dictionary values to sets with inner elements converted to tuples
+matches_as_sets = {key: {tuple(inner_tuple) for inner_tuple in value} for key, value in matches.items()}
+
+# Convert dictionary values back to lists with inner elements converted to lists
+matches = {key: [list(inner_tuple) for inner_tuple in value] for key, value in matches_as_sets.items()}
+
 image_pairs = list(matches.keys())
+image_pairs.sort()
+
+pprint(matches['1a2a3'])
+
+
+
+#______________________________________________________________________________________________________________________________________________________________________________________
+
 Flist = []
 
 indexes_dict = {}  # Dictionary to store indexes for each pair
@@ -217,31 +250,31 @@ for pair in image_pairs:
     if indexes_key not in indexes_dict:
         indexes_dict[indexes_key] = []  # Initialize the list if not present
 
-#     for i in range(len(matches[pair])):
-#         points1.append(matches[pair][i][0])
-#         points2.append(matches[pair][i][1])
-#         indexes_dict[indexes_key].append(i)  # Append the index to the corresponding list
+    for i in range(len(matches[pair])):
+        points1.append(matches[pair][i][0])
+        points2.append(matches[pair][i][1])
+        indexes_dict[indexes_key].append(i)  # Append the index to the corresponding list
 
-#     F, inlier_points1, inlier_points2, inlier_indexes_dict[indexes_key] = inlier_ransac(points1, points2, indexes_dict[indexes_key], 1000, 0.1)
-#     Flist.append(F)
-#     # Load images
-#     img1_path = f'.\P3Data\{source_img}.png'
-#     img2_path = f'.\P3Data\{target_img}.png'
-#     img1 = cv2.imread(img1_path)
-#     img2 = cv2.imread(img2_path)
+    F, inlier_points1, inlier_points2, inlier_indexes_dict[indexes_key] = inlier_ransac(points1, points2, indexes_dict[indexes_key], 1000, 0.1)
+    Flist.append(F)
+    # Load images
+    img1_path = f'.\P3Data\{source_img}.png'
+    img2_path = f'.\P3Data\{target_img}.png'
+    img1 = cv2.imread(img1_path)
+    img2 = cv2.imread(img2_path)
 
-#     # Convert inlier points to KeyPoint objects
-#     kp1 = [cv2.KeyPoint(pt[0], pt[1], 1) for pt in inlier_points1]
-#     kp2 = [cv2.KeyPoint(pt[0], pt[1], 1) for pt in inlier_points2]
+    # Convert inlier points to KeyPoint objects
+    kp1 = [cv2.KeyPoint(pt[0], pt[1], 1) for pt in inlier_points1]
+    kp2 = [cv2.KeyPoint(pt[0], pt[1], 1) for pt in inlier_points2]
     
-#     dmatches = [cv2.DMatch(i, i,0) for i in range(len(inlier_points1))]
+    dmatches = [cv2.DMatch(i, i,0) for i in range(len(inlier_points1))]
     
-#     # Draw matches
-#     output_image_path = f'.\\ransac_results\{source_img}a{target_img}_inliers.png'
-#     output_image = cv2.drawMatches(img1, kp1, img2, kp2, dmatches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
+    # Draw matches
+    output_image_path = f'.\\ransac_results\{source_img}a{target_img}_inliers.png'
+    output_image = cv2.drawMatches(img1, kp1, img2, kp2, dmatches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
     
-#     # Save the resulting image
-#     cv2.imwrite(output_image_path, output_image)
+    # Save the resulting image
+    cv2.imwrite(output_image_path, output_image)
 
 #fundatmental matrix to essential matrix
 # #fundamental matrix of 1a2
@@ -303,15 +336,15 @@ X_nonlinear = NonlinearTriangulation(K, C1, R1, C_linear, R_linear, inlier_point
 # # ______________________________________________________________________Plotting____________________________________________________________________________________________________
 
 
-# plot_triangulation_comparison(X_linear,X_nonlinear,R_linear, C_linear,R1,C1, source_img, target_img)
+plot_triangulation_comparison(X_linear,X_nonlinear,R_linear, C_linear,R1,C1, source_img, target_img)
 
 
-# img1_path = f'.\P3Data\{source_img}.png'
-# img2_path = f'.\P3Data\{target_img}.png'
-# img1 = cv2.imread(img1_path)
-# img2 = cv2.imread(img2_path)
-# img_number = source_img
-# plot_reprojection(X_linear, X_nonlinear, inlier_points1, img1, C_linear, R_linear, K, img_number)
+img1_path = f'.\P3Data\{source_img}.png'
+img2_path = f'.\P3Data\{target_img}.png'
+img1 = cv2.imread(img1_path)
+img2 = cv2.imread(img2_path)
+img_number = source_img
+plot_reprojection(X_linear, X_nonlinear, inlier_points1, img1, C_linear, R_linear, K, img_number)
 
 # #______________________________________________________________________________________________________________________________________________________________________________________
 
@@ -367,6 +400,3 @@ R_nlpnp, C_nlpnp = NonLinearPnP(X_positive, points1_positive, K, R_lpnp, C_lpnp)
 
 error_nlpnp = reprojectionErrorPnP(X_positive, points1_positive, K, R_nlpnp, C_nlpnp)
 print(f"Mean reprojection error for Nonlinear PnP: {np.mean(error_nlpnp)}")
-
-
-
