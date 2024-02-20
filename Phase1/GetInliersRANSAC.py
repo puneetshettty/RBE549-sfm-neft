@@ -3,10 +3,6 @@ import numpy as np
 
 from EstimateFundamentalMatrix import *
 
-# def inlier_ransac(points1, points2, max_iterations, threshold):
-#     best_inliers = []
-#     points1 = np.concatenate((points1,np.ones((points1.shape[0],1))),axis=1)
-#     points2 = np.concatenate((points2,np.ones((points2.shape[0],1))),axis=1)
     
 def inlier_ransac(points1, points2, indexes, max_iterations, threshold):
     best_inliers = []
@@ -18,19 +14,27 @@ def inlier_ransac(points1, points2, indexes, max_iterations, threshold):
     inlier_indexes = indexes
 
     population_size = len(points1)
-    num_samples = min(8, population_size)  # Ensure num_samples is less than or equal to population_size
+
+    # num_samples = min(8, population_size)  # Ensure num_samples is less than or equal to population_size
+    num_samples = min(7, population_size)  # Ensure num_samples is less than or equal to population_size
     
     for _ in range(max_iterations):
         # Randomly sample a subset of points
         sample_indices = np.random.choice(population_size, size=num_samples, replace=False)
+        print(sample_indices)
         sample_points1 = np.array([points1[i] for i in sample_indices])
         sample_points2 = np.array([points2[i] for i in sample_indices])
         
         # Estimate the fundamental matrix using the sampled points
-        fundamental_matrix = EstimateFundamentalMatrix(sample_points1, sample_points2)
+        # fundamental_matrix = EstimateFundamentalMatrix(sample_points1, sample_points2)
+        sample_points1 = sample_points1.reshape(-1, 1, 3)
+        sample_points2 = sample_points2.reshape(-1, 1, 3)
+        fundamental_matrix = EstimateFundamentalMatrix_7(sample_points1, sample_points2)
         
         # Compute the error for all points
         errors = np.abs(np.sum(points2 * (fundamental_matrix @ np.array(points1).T).T, axis=1))
+        # TODO check if the logic here is sound, can this be done in a vectorized way?
+        
         
         # Check which points are inliers (i.e., have error below the threshold)
         inliers = np.where(errors < threshold)[0]

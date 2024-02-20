@@ -22,15 +22,15 @@ def ExtractCameraPose(E):
     Cstack = [C1, C2, C3, C4]
     Rstack = [R1, R2, R3, R4]
 
-    C = []
-    R = []
+    Cstack_fixed = []
+    Rstack_fixed = []
 
     for Ci,Ri in zip(Cstack,Rstack):
         if np.linalg.det(Ri) < 0:
-            C.append(-Ci)
-            R.append(-Ri)
+            Cstack_fixed.append(-Ci)
+            Rstack_fixed.append(-Ri)
         else:
-            C.append(Ci)
-            R.append(Ri)
+            Cstack_fixed.append(Ci)
+            Rstack_fixed.append(Ri)
 
-    return C,R
+    return Cstack_fixed,Rstack_fixed

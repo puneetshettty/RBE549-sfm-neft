@@ -1,5 +1,8 @@
 import os
+import sys
 import glob
+import random
+
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
@@ -13,7 +16,7 @@ from DisambiguateCameraPose import DisambiguateCameraPose
 from NonlinearTriangulation import NonlinearTriangulation
 from PnPRANSAC import PnPRANSAC
 from NonLinearPnP import NonLinearPnP
-from scipy.spatial.transform import Rotation 
+from PlotResults import plot_ransac_results,plot_reprojection,plot_triangulation_comparison, plot_epi_lines
 
 
 def projectionMatrix(R,C,K):
@@ -87,67 +90,6 @@ def reprojectionErrorPnP(x3D, pts, K, R, C):
     return mean_error
 
 
-def plot_reprojection(X_linear, X_nonlinear, points1, img1, C, R, K, img_number):
-    # Compute the camera projection matrix
-    points1 = np.array(points1)
-    X_linear = np.concatenate((X_linear, np.ones((X_linear.shape[0], 1))), axis=1)
-    # X_nonlinear = np.concatenate((X_nonlinear, np.ones((X_nonlinear.shape[0], 1))), axis=1)
-    C = C.reshape(3, 1)
-    I = np.eye(3)
-    P = np.dot(K, np.dot(R, np.hstack((I, -C))))
-
-    # Project 3D points onto the image plane
-    proj_linear = np.dot(P, X_linear.T)
-    proj_nonlinear = np.dot(P, X_nonlinear.T)
-
-    # Normalize homogeneous coordinates
-    proj_linear_norm = proj_linear[:2] / proj_linear[2]
-    proj_nonlinear_norm = proj_nonlinear[:2] / proj_nonlinear[2]
-
-    # Plot the image with reprojections
-    plt.figure(figsize=(10, 6))
-    plt.imshow(img1, cmap='gray')
-    plt.scatter(proj_linear_norm[0], proj_linear_norm[1], c='r', marker='o',label='Linear Triangulation', s=2)
-    plt.scatter(proj_nonlinear_norm[0], proj_nonlinear_norm[1], c='b', marker='x', label='Nonlinear Triangulation', s =3)
-    plt.scatter(points1[:, 0], points1[:, 1], c='g', marker='s', label='Detected Features', s=1)
-    plt.xlabel('X')
-    plt.ylabel('Y')
-    plt.title('Reprojection of 3D Points onto Image Plane')
-    plt.legend()
-    plt.savefig(f'.\\results\\reprojection_{img_number}.png')
-
-def plot_triangulation_comparison(X_linear, X_nonlinear, R1, C1, R2, C2, source, target):
-    fig = plt.figure("Triangulation Comparison")
-    ax = fig.add_subplot()
-    
-    # Set axis limits
-    ax.set_xlim([-30, 30])
-    ax.set_ylim([-10, 30])
-    
-    # Plot linear and nonlinear triangulated points
-    ax.scatter(X_linear[:, 0], X_linear[:, 2], c="b", s=1, label="Linear Triangulation")
-    ax.scatter(X_nonlinear[:, 0], X_nonlinear[:, 2], c="r", s=1, label="Nonlinear Triangulation")
-    
-    # Draw cameras
-    for rotation, position, label in [(R1, C1, "1"), (R2, C2, "2")]:
-        # Convert rotation matrix to Euler angles
-        angles = Rotation.from_matrix(rotation).as_euler("XYZ")
-        angles_deg = np.rad2deg(angles)
-        
-        # Plot camera position
-        ax.plot(position[0], position[2], marker=(3, 0, int(angles_deg[1])), markersize=15, linestyle='None') 
-        
-        # Annotate camera with label
-        correction = -0.1
-        ax.annotate(label, xy=(position[0] + correction, position[2] + correction))
-    
-    # Set legend and display plot
-    ax.legend()
-    plt.savefig(f'.\\results\\triangulation_{source}a{target}.png')
-    plt.close()
-
-
-
 def read_matching_file(files_path):
     txt_files = glob.glob(os.path.join(files_path, '*.txt'))
     png_files = glob.glob(os.path.join(files_path, '*.png'))
@@ -198,205 +140,201 @@ def read_matching_file(files_path):
                         else: 
                             matches[key] = [(x[1], y[1])]
 
-                    if num_pairs > 1:
-                        combinations_3 = list(itertools.combinations(combinations, 3))
+                    # if num_pairs > 1:
+                    #     combinations_3 = list(itertools.combinations(combinations, 3))
                         
-                        # Only doing for 3 images
-                        for x,y,z in combinations_3:
-                            key = f"{x[0]}a{y[0]}a{z[0]}"
+                    #     # Only doing for 3 images
+                    #     for x,y,z in combinations_3:
+                    #         key = f"{x[0]}a{y[0]}a{z[0]}"
 
-                            if key in matches:
-                                matches[key].append((x[1], y[1], z[1]))
-                            else: 
-                                matches[key] = [(x[1], y[1], z[1])]
+                    #         if key in matches:
+                    #             matches[key].append((x[1], y[1], z[1]))
+                    #         else: 
+                    #             matches[key] = [(x[1], y[1], z[1])]
                     # if l == 6:
                     #     break
     return matches 
 
 
-# Example usage:
+
+
+class Main:
+    def __init__(self, files_path):
+        # Example usage:
+        self.files_path = files_path
+
+        matches = read_matching_file(self.files_path)
+
+        # Convert dictionary values to sets with inner elements converted to tuples
+        matches_as_sets = {key: {tuple(inner_tuple) for inner_tuple in value} for key, value in matches.items()}
+
+        # Convert dictionary values back to lists with inner elements converted to lists
+        self.matches = {key: [list(inner_tuple) for inner_tuple in value] for key, value in matches_as_sets.items()}
+
+        # self.target_pairs = ['1a2','1a3','1a4','1a5']
+        self.target_pairs = ['1a2']
+
+    def estimate_fundamental_matrices(self):
+        self.fundamental_matrices = {}
+
+        indexes_dict = {}  # Dictionary to store indexes for each pair
+        inlier_indexes_dict = {}
+
+        self.pairwise_inlier_points_1 = {}
+        self.pairwise_inlier_points_2 = {}
+
+        # for pair in image_pairs:
+        for pair in self.target_pairs:
+            source_img, target_img = map(int, [pair[0], pair[2]])
+            points1 = []
+            points2 = []
+            indexes_key = f"{source_img}a{target_img}"  # Key for the indexes list
+
+            if indexes_key not in indexes_dict:
+                indexes_dict[indexes_key] = []  # Initialize the list if not present
+
+            for i in range(len(self.matches[pair])):
+                points1.append(self.matches[pair][i][0])
+                points2.append(self.matches[pair][i][1])
+                indexes_dict[indexes_key].append(i)  # Append the index to the corresponding list
+            
+
+            F, inlier_points1, inlier_points2, inlier_indexes_dict[indexes_key] = inlier_ransac(points1, points2, indexes_dict[indexes_key], 1000, 0.1)
+            self.fundamental_matrices[indexes_key] = F
+            # Load images
+            self.pairwise_inlier_points_1[pair] = inlier_points1
+            self.pairwise_inlier_points_2[pair] = inlier_points2
+            plot_ransac_results(source_img, target_img, inlier_points1, inlier_points2)
+
+            plot_epi_lines(source_img, target_img, points1, points2, F)
+
+
+    def drawlines(self,img1,lines,pts1,pts2):
+        ''' img1 - image on which we draw the epilines for the points in img2
+        lines - corresponding epilines '''
+        r,c,m = np.shape(img1)
+        print(r,c)
+
+        for r,pt1,pt2 in zip(lines,pts1,pts2):
+            color = tuple(np.random.randint(0,255,3).tolist())
+            x0,y0 = map(int, [0, -r[2]/r[1] ])
+            x1,y1 = map(int, [c, -(r[2]+r[0]*c)/r[1] ])
+
+            pt1 = tuple(map(int, pt1))
+            pt2 = tuple(map(int, pt2))
+
+            img1 = cv2.line(img1, (x0,y0), (x1,y1), color,1)
+            img1 = cv2.circle(img1,tuple(pt1),2,color,-1)
+        return img1
+
+    def estimate_essential_matrix(self):
+        # Getting Camera Calibration K from calibration.txt
+        K = np.loadtxt(os.path.join(self.files_path, 'calibration.txt'))
+        K = np.array(K.reshape(3,3))
+        self.K = K
+
+        #essential matrix from fundamental matrix and k
+        self.essential_matrix = {}
+        for image_pair in self.target_pairs:
+            self.essential_matrix[image_pair] = EssentialMatrixFromFundamentalMatrix(K, self.fundamental_matrices[image_pair])
+
+    def extract_camera_pose(self):
+        self.ambigous_camera_poses = {}
+        for image_pair in self.target_pairs:
+            self.ambigous_camera_poses[image_pair] = ExtractCameraPose(self.essential_matrix[image_pair])
+
+    def triangulate_and_fix_camera_pose(self):
+        C1 = np.array([0, 0, 0])
+        R1 = np.eye(3)
+
+        for pair in self.target_pairs:
+            source_img, target_img = map(int, [pair[0], pair[2]])
+            X_stack = []
+            C_stack, R_stack = self.ambigous_camera_poses[pair]
+            for i in range(len(C_stack)):
+                C2 = C_stack[i]
+                R2 = R_stack[i]
+                Xt = LinearTriangulation(
+                    self.pairwise_inlier_points_1[pair],
+                    self.pairwise_inlier_points_2[pair],
+                    self.K, C1, R1, C2, R2)
+                X_stack.append(Xt)
+
+            C_linear, R_linear, X_linear = DisambiguateCameraPose(C_stack, R_stack, X_stack)
+
+            # Nonlinear Triangulation
+            X_nonlinear = NonlinearTriangulation(self.K, C1, R1, C_linear, R_linear, 
+                                                 self.pairwise_inlier_points_1[pair],
+                                                 self.pairwise_inlier_points_2[pair],
+                                                 X_linear)
+    
+            plot_triangulation_comparison(X_linear,X_nonlinear,R_linear, C_linear,R1,C1, source_img, target_img)
+
+
+            img1_path = f'./P3Data/{source_img}.png'
+            img2_path = f'./P3Data/{target_img}.png'
+            img1 = cv2.imread(img1_path)
+            img2 = cv2.imread(img2_path)
+            img_number = source_img
+            plot_reprojection(X_linear, X_nonlinear, self.pairwise_inlier_points_1[pair], img1, C_linear, R_linear, self.K, img_number)
+
 files_path = os.path.normpath('P3Data')
-
-matches = read_matching_file(files_path)
-
-
-# Convert dictionary values to sets with inner elements converted to tuples
-matches_as_sets = {key: {tuple(inner_tuple) for inner_tuple in value} for key, value in matches.items()}
-
-# Convert dictionary values back to lists with inner elements converted to lists
-matches = {key: [list(inner_tuple) for inner_tuple in value] for key, value in matches_as_sets.items()}
-
-image_pairs = list(matches.keys())
-image_pairs.sort()
-
-pprint(matches['1a2a3'])
+main = Main(files_path)
+main.estimate_fundamental_matrices()
+main.estimate_essential_matrix()
+main.extract_camera_pose()
+main.triangulate_and_fix_camera_pose()
 
 
+# X_positive = []
+# index_positive = []
 
-#______________________________________________________________________________________________________________________________________________________________________________________
-
-Flist = []
-
-indexes_dict = {}  # Dictionary to store indexes for each pair
-inlier_indexes_dict = {}
-
-# for pair in image_pairs:
-for pair in image_pairs:
-    source_img, target_img = map(int, [pair[0], pair[2]])
-    points1 = []
-    points2 = []
-    indexes_key = f"{source_img}a{target_img}"  # Key for the indexes list
-
-    if indexes_key not in indexes_dict:
-        indexes_dict[indexes_key] = []  # Initialize the list if not present
-
-    for i in range(len(matches[pair])):
-        points1.append(matches[pair][i][0])
-        points2.append(matches[pair][i][1])
-        indexes_dict[indexes_key].append(i)  # Append the index to the corresponding list
-
-    F, inlier_points1, inlier_points2, inlier_indexes_dict[indexes_key] = inlier_ransac(points1, points2, indexes_dict[indexes_key], 1000, 0.1)
-    Flist.append(F)
-    # Load images
-    img1_path = f'.\P3Data\{source_img}.png'
-    img2_path = f'.\P3Data\{target_img}.png'
-    img1 = cv2.imread(img1_path)
-    img2 = cv2.imread(img2_path)
-
-    # Convert inlier points to KeyPoint objects
-    kp1 = [cv2.KeyPoint(pt[0], pt[1], 1) for pt in inlier_points1]
-    kp2 = [cv2.KeyPoint(pt[0], pt[1], 1) for pt in inlier_points2]
+# for X,index in zip(X_nonlinear, linear_indexes):
     
-    dmatches = [cv2.DMatch(i, i,0) for i in range(len(inlier_points1))]
-    
-    # Draw matches
-    output_image_path = f'.\\ransac_results\{source_img}a{target_img}_inliers.png'
-    output_image = cv2.drawMatches(img1, kp1, img2, kp2, dmatches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
-    
-    # Save the resulting image
-    cv2.imwrite(output_image_path, output_image)
-
-#fundatmental matrix to essential matrix
-# #fundamental matrix of 1a2
-# F12 = Flist[0]
-
-# # Getting Camera Calibration K from calibration.txt
-# K = np.loadtxt('.\P3Data\calibration.txt')
-# K = np.array(K.reshape(3,3))
-
-# #essential matrix from fundamental matrix and k
-# E12 = EssentialMatrixFromFundamentalMatrix(K,F12)
-
-# # camera pose from essential matrix
-# C, R = ExtractCameraPose(E12)
-
-# Linear Triangulation
-pair = image_pairs[0]
-source_img, target_img = map(int, [pair[0], pair[2]])
-points1 = []
-points2 = []
-for i in range(len(matches[pair])):
-    points1.append(matches[pair][i][0])
-    points2.append(matches[pair][i][1])
-    indexes_dict['1a2'].append(i)
-
-F12, inlier_points1, inlier_points2, inlier_indexes_dict['1a2'] = inlier_ransac(points1, points2, indexes_dict['1a2'], 1000, 0.1)
-
-indexes_1a2 = indexes_dict['1a2']
-inlier_indexes_1a2 = inlier_indexes_dict['1a2']
-#fundamental matrix of 1a2
-# F12 = Flist[0]
-
-# Getting Camera Calibration K from calibration.txt
-K = np.loadtxt('.\P3Data\calibration.txt')
-K = np.array(K.reshape(3,3))
-
-#essential matrix from fundamental matrix and k
-E12 = EssentialMatrixFromFundamentalMatrix(K,F12)
-
-# camera pose from essential matrix
-C, R = ExtractCameraPose(E12)
-
-C1 = np.array([0, 0, 0])
-R1 = np.eye(3)
-X = []
-for i in range(len(C)):
-    C2 = C[i]
-    R2 = R[i]
-    Xt = LinearTriangulation(inlier_points1, inlier_points2, K, C1, R1, C2, R2)
-    X.append(Xt)
-
-C_linear, R_linear, X_linear, linear_indexes = DisambiguateCameraPose(C, R, X, inlier_indexes_1a2)
-
-# Nonlinear Triangulation
-X_nonlinear = NonlinearTriangulation(K, C1, R1, C_linear, R_linear, inlier_points1, inlier_points2, X_linear)
+#     if (np.isnan(X[0])) | (X[0] <= 0):
+#         # print(f"Point {index} is behind the camera")
+#         continue
+#     else:
+#         # print(f"Point {index} is in front of the camera")
+#         X_positive.append(X)
+#         index_positive.append(index)
 
 
 
-# # ______________________________________________________________________Plotting____________________________________________________________________________________________________
-
-
-plot_triangulation_comparison(X_linear,X_nonlinear,R_linear, C_linear,R1,C1, source_img, target_img)
-
-
-img1_path = f'.\P3Data\{source_img}.png'
-img2_path = f'.\P3Data\{target_img}.png'
-img1 = cv2.imread(img1_path)
-img2 = cv2.imread(img2_path)
-img_number = source_img
-plot_reprojection(X_linear, X_nonlinear, inlier_points1, img1, C_linear, R_linear, K, img_number)
-
-# #______________________________________________________________________________________________________________________________________________________________________________________
-
-X_positive = []
-index_positive = []
-
-for X,index in zip(X_nonlinear, linear_indexes):
-    
-    if (np.isnan(X[0])) | (X[0] <= 0):
-        # print(f"Point {index} is behind the camera")
-        continue
-    else:
-        # print(f"Point {index} is in front of the camera")
-        X_positive.append(X)
-        index_positive.append(index)
-
-
-
-# print(f"Number of points in front of the camera: {len(X_positive)}")
-# print(f"Number of points behind the camera: {len(X_linear) - len(X_positive)}")
+# # print(f"Number of points in front of the camera: {len(X_positive)}")
+# # print(f"Number of points behind the camera: {len(X_linear) - len(X_positive)}")
         
-# extracting features of the given index points
-points1_positive = []
-# points2_positive = []
+# # extracting features of the given index points
+# points1_positive = []
+# # points2_positive = []
 
-for index in index_positive:
-    points1_positive.append(points1[index])
-    # points2_positive.append(points2[index])
-
-
-
-#linear PnP
+# for index in index_positive:
+#     points1_positive.append(points1[index])
+#     # points2_positive.append(points2[index])
 
 
-R_lpnp, C_lpnp = PnPRANSAC(X_positive, points1_positive, K, 10000, 200)
-# print(f'Rotation matrix from PnP: {R_pnp}')
-# print(f'Camera position from PnP: {C_pnp}')
-# print(f'camera position from linear triangulation: {C_linear}')
+
+# #linear PnP
 
 
-# #___________________________________________________________________Error Calculation_______________________________________________________
+# R_lpnp, C_lpnp = PnPRANSAC(X_positive, points1_positive, K, 10000, 200)
+# # print(f'Rotation matrix from PnP: {R_pnp}')
+# # print(f'Camera position from PnP: {C_pnp}')
+# # print(f'camera position from linear triangulation: {C_linear}')
 
-error_lpnp = reprojectionErrorPnP(X_positive, points1_positive, K, R_lpnp, C_lpnp)
-print(f"Mean reprojection error for PnP: {np.mean(error_lpnp)}")
-# error_linear = ReProjectionError(X_linear, inlier_points1, inlier_points2, C1, R1, C_linear, R_linear, K)
-# print(f"Mean reprojection error for linear triangulation: {np.mean(error_linear)}")
-# error_nonlinear = ReProjectionError(X_nonlinear, inlier_points1, inlier_points2, C1, R1, C_linear, R_linear, K)
-# print(f"Mean reprojection error for nonlinear triangulation: {np.mean(error_nonlinear)}")
 
-# #___________________________________________________________________________________________________________________________________________
+# # #___________________________________________________________________Error Calculation_______________________________________________________
 
-R_nlpnp, C_nlpnp = NonLinearPnP(X_positive, points1_positive, K, R_lpnp, C_lpnp)
+# error_lpnp = reprojectionErrorPnP(X_positive, points1_positive, K, R_lpnp, C_lpnp)
+# print(f"Mean reprojection error for PnP: {np.mean(error_lpnp)}")
+# # error_linear = ReProjectionError(X_linear, inlier_points1, inlier_points2, C1, R1, C_linear, R_linear, K)
+# # print(f"Mean reprojection error for linear triangulation: {np.mean(error_linear)}")
+# # error_nonlinear = ReProjectionError(X_nonlinear, inlier_points1, inlier_points2, C1, R1, C_linear, R_linear, K)
+# # print(f"Mean reprojection error for nonlinear triangulation: {np.mean(error_nonlinear)}")
 
-error_nlpnp = reprojectionErrorPnP(X_positive, points1_positive, K, R_nlpnp, C_nlpnp)
-print(f"Mean reprojection error for Nonlinear PnP: {np.mean(error_nlpnp)}")
+# # #___________________________________________________________________________________________________________________________________________
+
+# R_nlpnp, C_nlpnp = NonLinearPnP(X_positive, points1_positive, K, R_lpnp, C_lpnp)
+
+# error_nlpnp = reprojectionErrorPnP(X_positive, points1_positive, K, R_nlpnp, C_nlpnp)
+# print(f"Mean reprojection error for Nonlinear PnP: {np.mean(error_nlpnp)}")
