@@ -1,12 +1,11 @@
 import numpy as np
 
-def DisambiguateCameraPose(Cstack, Rstack, Xstack, indexes):
+def DisambiguateCameraPose(Cstack, Rstack, Xstack):
 
     # For all poses
     final_C = None
     final_R = None
     final_X = None
-    indexes = np.array(indexes)
     max_inliers = []
     for C, R, X in zip(Cstack, Rstack, Xstack):
         r3 = R[:,2]
@@ -22,7 +21,6 @@ def DisambiguateCameraPose(Cstack, Rstack, Xstack, indexes):
             final_C = C
             final_R = R
             final_X = X[inliers]
-            linear_indexes = indexes[inliers]
             max_inliers = inliers
 
-    return final_C.flatten(), final_R, final_X, linear_indexes
+    return final_C.flatten(), final_R, final_X 
