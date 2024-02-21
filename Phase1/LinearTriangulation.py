@@ -10,8 +10,8 @@ def LinearTriangulation(points1, points2, K, C1, R1, C2, R2):
 
     C1 = C1.reshape(3, 1)
     C2 = C2.reshape(3, 1)
-    T1 = - R1 @ C1
-    T2 = - R2 @ C2
+    # T1 = - R1 @ C1
+    # T2 = - R2 @ C2
     I = np.eye(3)
     P1 = np.dot(K, np.dot(R1, np.hstack((I, -C1))))  # the P is written this way but not as P = K[R T] because the C and R here means the rotation and translation between cameras 
     P2 = np.dot(K, np.dot(R2, np.hstack((I, -C2))))
@@ -30,10 +30,10 @@ def LinearTriangulation(points1, points2, K, C1, R1, C2, R2):
 
         U, S, VT = np.linalg.svd(A)
         
-        Xt = VT[np.argmin(S), :]
+        Xt = VT[-1, :]
         Xt = Xt / Xt[3]
         Xt = Xt[0:3]
-        
+                
         X.append(Xt)
     
     X = np.vstack(X)

@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import itertools
 from pprint import pprint
-from GetInliersRANSAC import inlier_ransac
+from GetInliersRANSAC import inlier_ransac, get_inliers_RANSAC
 from EssentialMatrixFromFundamentalMatrix import EssentialMatrixFromFundamentalMatrix
 from ExtractCameraPose import ExtractCameraPose
 from LinearTriangulation import LinearTriangulation
@@ -16,7 +16,8 @@ from DisambiguateCameraPose import DisambiguateCameraPose
 from NonlinearTriangulation import NonlinearTriangulation
 from PnPRANSAC import PnPRANSAC
 from NonLinearPnP import NonLinearPnP
-from PlotResults import plot_ransac_results,plot_reprojection,plot_triangulation_comparison, plot_epi_lines
+from PlotResults import plot_ransac_results,plot_reprojection,plot_triangulation_comparison, plot_epi_lines, plot_initial_triangulation, make_output_dir, plot_points
+from EstimateHomography import get_homography_ransac
 
 
 def projectionMatrix(R,C,K):
@@ -156,8 +157,6 @@ def read_matching_file(files_path):
     return matches 
 
 
-
-
 class Main:
     def __init__(self, files_path):
         # Example usage:
@@ -171,8 +170,41 @@ class Main:
         # Convert dictionary values back to lists with inner elements converted to lists
         self.matches = {key: [list(inner_tuple) for inner_tuple in value] for key, value in matches_as_sets.items()}
 
+        
+
         # self.target_pairs = ['1a2','1a3','1a4','1a5']
-        self.target_pairs = ['1a2']
+        # self.target_pairs = ['1a2']
+        self.after_homography_1 = None
+        self.target_pairs = self.matches.keys()
+
+        for pair in self.target_pairs:
+            source_img, target_img = map(int, [pair[0], pair[2]])
+            points1 = []
+            points2 = []
+            for i in range(len(self.matches[pair])):
+                points1.append(self.matches[pair][i][0])
+                points2.append(self.matches[pair][i][1])
+            plot_points(points1, pair, source_img)
+            plot_points(points2, pair, target_img)
+
+
+    
+    def eliminate_outliers_using_homography(self):
+        self.after_homography_1 = {}
+        self.after_homography_2 = {}
+
+        for pair in self.target_pairs:
+            points1 = []
+            points2 = []
+
+            for i in range(len(self.matches[pair])):
+                points1.append(self.matches[pair][i][0])
+                points2.append(self.matches[pair][i][1])
+
+            H, inlier_points1, inlier_points2, _ = get_homography_ransac(points1, points2, self.matches[pair], tau=200
+                                                                         ,tau_upper_bound = 200)
+            self.after_homography_1[pair] = inlier_points1
+            self.after_homography_2[pair] = inlier_points2
 
     def estimate_fundamental_matrices(self):
         self.fundamental_matrices = {}
@@ -186,46 +218,46 @@ class Main:
         # for pair in image_pairs:
         for pair in self.target_pairs:
             source_img, target_img = map(int, [pair[0], pair[2]])
+            print("Calculating fundamental matrix for pair", pair)
+
             points1 = []
             points2 = []
-            indexes_key = f"{source_img}a{target_img}"  # Key for the indexes list
 
-            if indexes_key not in indexes_dict:
-                indexes_dict[indexes_key] = []  # Initialize the list if not present
+            if pair not in indexes_dict:
+                indexes_dict[pair] = []  # Initialize the list if not present
 
-            for i in range(len(self.matches[pair])):
-                points1.append(self.matches[pair][i][0])
-                points2.append(self.matches[pair][i][1])
-                indexes_dict[indexes_key].append(i)  # Append the index to the corresponding list
+            if self.after_homography_1: # If the matches have been filtered using homography
+                for i in range(len(self.after_homography_1[pair])):
+                    points1.append(self.after_homography_1[pair][i])
+                    points2.append(self.after_homography_2[pair][i])
+                    indexes_dict[pair].append(i)  # Append the index to the corresponding list
+            else: 
+                for i in range(len(self.matches[pair])):
+                    points1.append(self.matches[pair][i][0])
+                    points2.append(self.matches[pair][i][1])
+                    indexes_dict[pair].append(i)  # Append the index to the corresponding list
+            # plot_ransac_results(source_img, target_img, points1, points2)
             
 
-            F, inlier_points1, inlier_points2, inlier_indexes_dict[indexes_key] = inlier_ransac(points1, points2, indexes_dict[indexes_key], 1000, 0.1)
-            self.fundamental_matrices[indexes_key] = F
+            F, inlier_points1, inlier_points2, inlier_indexes_dict[pair] = inlier_ransac(points1, points2, indexes_dict[pair], 3000, 0.019, pair)
+            # F, new_matches = get_inliers_RANSAC(self.matches[pair])
+
+            # inlier_points1 = [match[0] for match in new_matches]
+            # inlier_points2 = [match[1] for match in new_matches]
+
+            self.fundamental_matrices[pair] = F
             # Load images
-            self.pairwise_inlier_points_1[pair] = inlier_points1
-            self.pairwise_inlier_points_2[pair] = inlier_points2
             plot_ransac_results(source_img, target_img, inlier_points1, inlier_points2)
 
-            plot_epi_lines(source_img, target_img, points1, points2, F)
+            subset_1 = [(x,y) for (x,y,z) in inlier_points1]
+            subset_2 = [(x,y) for (x,y,z) in inlier_points2]
 
+            plot_epi_lines(source_img, target_img, subset_1, subset_2, F)
+            
 
-    def drawlines(self,img1,lines,pts1,pts2):
-        ''' img1 - image on which we draw the epilines for the points in img2
-        lines - corresponding epilines '''
-        r,c,m = np.shape(img1)
-        print(r,c)
+            self.pairwise_inlier_points_1[pair] = inlier_points1
+            self.pairwise_inlier_points_2[pair] = inlier_points2
 
-        for r,pt1,pt2 in zip(lines,pts1,pts2):
-            color = tuple(np.random.randint(0,255,3).tolist())
-            x0,y0 = map(int, [0, -r[2]/r[1] ])
-            x1,y1 = map(int, [c, -(r[2]+r[0]*c)/r[1] ])
-
-            pt1 = tuple(map(int, pt1))
-            pt2 = tuple(map(int, pt2))
-
-            img1 = cv2.line(img1, (x0,y0), (x1,y1), color,1)
-            img1 = cv2.circle(img1,tuple(pt1),2,color,-1)
-        return img1
 
     def estimate_essential_matrix(self):
         # Getting Camera Calibration K from calibration.txt
@@ -246,6 +278,9 @@ class Main:
     def triangulate_and_fix_camera_pose(self):
         C1 = np.array([0, 0, 0])
         R1 = np.eye(3)
+        self.camera_translations = [C1]
+        self.camera_rotations = [R1]
+        self.point_cloud = []
 
         for pair in self.target_pairs:
             source_img, target_img = map(int, [pair[0], pair[2]])
@@ -259,8 +294,14 @@ class Main:
                     self.pairwise_inlier_points_2[pair],
                     self.K, C1, R1, C2, R2)
                 X_stack.append(Xt)
+            
+            plot_initial_triangulation(C_stack, R_stack, X_stack, source_img, target_img)
 
             C_linear, R_linear, X_linear = DisambiguateCameraPose(C_stack, R_stack, X_stack)
+            
+            X_linear = LinearTriangulation(self.pairwise_inlier_points_1[pair], self.pairwise_inlier_points_2[pair],
+                    self.K, C1, R1, C_linear, R_linear)
+                
 
             # Nonlinear Triangulation
             X_nonlinear = NonlinearTriangulation(self.K, C1, R1, C_linear, R_linear, 
@@ -270,71 +311,70 @@ class Main:
     
             plot_triangulation_comparison(X_linear,X_nonlinear,R_linear, C_linear,R1,C1, source_img, target_img)
 
-
             img1_path = f'./P3Data/{source_img}.png'
-            img2_path = f'./P3Data/{target_img}.png'
-            img1 = cv2.imread(img1_path)
-            img2 = cv2.imread(img2_path)
-            img_number = source_img
-            plot_reprojection(X_linear, X_nonlinear, self.pairwise_inlier_points_1[pair], img1, C_linear, R_linear, self.K, img_number)
+            img1 = cv2.imread(img1_path, cv2.COLOR_BGR2RGB)
+            plot_reprojection(X_linear, X_nonlinear, self.pairwise_inlier_points_1[pair], img1, C_linear, R_linear, self.K, pair)
+
+    def apply_pnp(self):
+        X_positive = []
+        index_positive = []
+
+        for X,index in zip(X_nonlinear, linear_indexes):
+            
+            if (np.isnan(X[0])) | (X[0] <= 0):
+                # print(f"Point {index} is behind the camera")
+                continue
+            else:
+                # print(f"Point {index} is in front of the camera")
+                X_positive.append(X)
+                index_positive.append(index)
+
+
+
+        # print(f"Number of points in front of the camera: {len(X_positive)}")
+        # print(f"Number of points behind the camera: {len(X_linear) - len(X_positive)}")
+                
+        # extracting features of the given index points
+        points1_positive = []
+        # points2_positive = []
+
+        for index in index_positive:
+            points1_positive.append(points1[index])
+            # points2_positive.append(points2[index])
+
+
+
+        #linear PnP
+
+
+        R_lpnp, C_lpnp = PnPRANSAC(X_positive, points1_positive, K, 10000, 200)
+        # print(f'Rotation matrix from PnP: {R_pnp}')
+        # print(f'Camera position from PnP: {C_pnp}')
+        # print(f'camera position from linear triangulation: {C_linear}')
+
+
+        # #___________________________________________________________________Error Calculation_______________________________________________________
+
+        error_lpnp = reprojectionErrorPnP(X_positive, points1_positive, K, R_lpnp, C_lpnp)
+        print(f"Mean reprojection error for PnP: {np.mean(error_lpnp)}")
+        # error_linear = ReProjectionError(X_linear, inlier_points1, inlier_points2, C1, R1, C_linear, R_linear, K)
+        # print(f"Mean reprojection error for linear triangulation: {np.mean(error_linear)}")
+        # error_nonlinear = ReProjectionError(X_nonlinear, inlier_points1, inlier_points2, C1, R1, C_linear, R_linear, K)
+        # print(f"Mean reprojection error for nonlinear triangulation: {np.mean(error_nonlinear)}")
+
+        # #___________________________________________________________________________________________________________________________________________
+
+        R_nlpnp, C_nlpnp = NonLinearPnP(X_positive, points1_positive, K, R_lpnp, C_lpnp)
+
+        error_nlpnp = reprojectionErrorPnP(X_positive, points1_positive, K, R_nlpnp, C_nlpnp)
+        print(f"Mean reprojection error for Nonlinear PnP: {np.mean(error_nlpnp)}")
+
 
 files_path = os.path.normpath('P3Data')
 main = Main(files_path)
+# main.eliminate_outliers_using_homography()
+make_output_dir()
 main.estimate_fundamental_matrices()
 main.estimate_essential_matrix()
 main.extract_camera_pose()
 main.triangulate_and_fix_camera_pose()
-
-
-# X_positive = []
-# index_positive = []
-
-# for X,index in zip(X_nonlinear, linear_indexes):
-    
-#     if (np.isnan(X[0])) | (X[0] <= 0):
-#         # print(f"Point {index} is behind the camera")
-#         continue
-#     else:
-#         # print(f"Point {index} is in front of the camera")
-#         X_positive.append(X)
-#         index_positive.append(index)
-
-
-
-# # print(f"Number of points in front of the camera: {len(X_positive)}")
-# # print(f"Number of points behind the camera: {len(X_linear) - len(X_positive)}")
-        
-# # extracting features of the given index points
-# points1_positive = []
-# # points2_positive = []
-
-# for index in index_positive:
-#     points1_positive.append(points1[index])
-#     # points2_positive.append(points2[index])
-
-
-
-# #linear PnP
-
-
-# R_lpnp, C_lpnp = PnPRANSAC(X_positive, points1_positive, K, 10000, 200)
-# # print(f'Rotation matrix from PnP: {R_pnp}')
-# # print(f'Camera position from PnP: {C_pnp}')
-# # print(f'camera position from linear triangulation: {C_linear}')
-
-
-# # #___________________________________________________________________Error Calculation_______________________________________________________
-
-# error_lpnp = reprojectionErrorPnP(X_positive, points1_positive, K, R_lpnp, C_lpnp)
-# print(f"Mean reprojection error for PnP: {np.mean(error_lpnp)}")
-# # error_linear = ReProjectionError(X_linear, inlier_points1, inlier_points2, C1, R1, C_linear, R_linear, K)
-# # print(f"Mean reprojection error for linear triangulation: {np.mean(error_linear)}")
-# # error_nonlinear = ReProjectionError(X_nonlinear, inlier_points1, inlier_points2, C1, R1, C_linear, R_linear, K)
-# # print(f"Mean reprojection error for nonlinear triangulation: {np.mean(error_nonlinear)}")
-
-# # #___________________________________________________________________________________________________________________________________________
-
-# R_nlpnp, C_nlpnp = NonLinearPnP(X_positive, points1_positive, K, R_lpnp, C_lpnp)
-
-# error_nlpnp = reprojectionErrorPnP(X_positive, points1_positive, K, R_nlpnp, C_nlpnp)
-# print(f"Mean reprojection error for Nonlinear PnP: {np.mean(error_nlpnp)}")

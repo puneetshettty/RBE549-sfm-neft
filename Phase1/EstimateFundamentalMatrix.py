@@ -8,11 +8,8 @@ from scipy.linalg import null_space
 
 def EstimateFundamentalMatrix(pts1,pts2):
 
-    # Comverting the match points into (x1,y1) and (x2,y2) 
-
-   
+    # Converting the match points into (x1,y1) and (x2,y2) 
     A =[]
-
     for index in range(len(pts1)):
 
         x1 = pts1[index][0]
@@ -21,6 +18,7 @@ def EstimateFundamentalMatrix(pts1,pts2):
         y2 = pts2[index][1]
 
         A.append([x1*x2, y1*x2, x2, x1*y2, y1*y2, y2, x1, y1, 1])
+        # A.append([x1*x2, x1*y2, x1, y1*x2, y1*y2, y1, x2, y2, 1])
 
 
     U,S,VT = np.linalg.svd(A)
@@ -34,7 +32,6 @@ def EstimateFundamentalMatrix(pts1,pts2):
     s[2] = 0
     s = np.diag(s)                    
     F = u @ s @ vt
-
 
     return F
 

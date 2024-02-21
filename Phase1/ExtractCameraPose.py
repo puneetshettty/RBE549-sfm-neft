@@ -13,7 +13,6 @@ def ExtractCameraPose(E):
     C4 = -U[:,2]
 
 
-
     R1 = U @ W @ Vt
     R2 = U @ W @ Vt
     R3 = U @ W.T @ Vt
