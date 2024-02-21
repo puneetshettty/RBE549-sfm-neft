@@ -1,9 +1,9 @@
 import numpy as np
 from LinearPnP import LinearPnP
 
-def PnPRANSAC(world_points, feature_points, K, max_iterations, threshold):
+def PnPRANSAC(world_points, imgj_features, K, max_iterations, threshold):
     world_points = np.array(world_points)
-    feature_points = np.array(feature_points)
+    imgj_features = np.array(imgj_features)
     
     best_inliers = 0
     best_R = None
@@ -18,14 +18,14 @@ def PnPRANSAC(world_points, feature_points, K, max_iterations, threshold):
         
         indices = np.random.choice(world_points.shape[0], 6, replace=False)
         world_points_sample = world_points[indices]
-        feature_points_sample = feature_points[indices]
+        feature_points_sample = imgj_features[indices]
         R, C = LinearPnP(world_points_sample, feature_points_sample, K)
         inliers = 0
         
         for j in range(world_points.shape[0]):
-            u, v = feature_points[j]
-            # X = np.concatenate((world_points[j], [1]))  # Add homogeneous coordinate
-            X = world_points[j].reshape(4, 1)
+            u, v,_ = imgj_features[j]
+            X = np.concatenate((world_points[j], [1]))  # Add homogeneous coordinate
+            # X = world_points[j].reshape(4, 1)
             C = C.reshape(3, 1)
             P = K @ R @ np.hstack((np.eye(3), -C))  # Camera projection matrix
             

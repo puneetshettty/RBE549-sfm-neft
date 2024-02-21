@@ -11,8 +11,8 @@ def lossfunction(x, world_points, feature_points, K):
     P = K @ np.hstack((R, -R @ C.reshape(3, 1)))
     reprojection_error = []
     for i in range(len(world_points)):
-        # X = np.concatenate((world_points[i], [1]))
-        X = world_points[i].reshape(4, 1)
+        X = np.concatenate((world_points[i], [1]))
+        # X = world_points[i].reshape(4, 1)
         u, v = feature_points[i][0], feature_points[i][1]
         X_projected = P @ X
         u_projected = X_projected[0] / X_projected[2]

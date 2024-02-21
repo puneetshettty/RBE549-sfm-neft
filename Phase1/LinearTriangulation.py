@@ -36,6 +36,7 @@ def LinearTriangulation(points1, points2, K, C1, R1, C2, R2):
                 
         X.append(Xt)
     
+    # TODO what does this line do?
     X = np.vstack(X)
 
     return X
