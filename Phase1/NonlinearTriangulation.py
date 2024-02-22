@@ -33,7 +33,7 @@ def NonlinearTriangulation(K,C1, R1,C2,R2, points1, points2, Xstack):
     for i, Xpoint in enumerate(Xstack):
         optimal_params = least_squares(fun=LossFunction, x0=Xpoint, method='trf', args=(points1[i], points2[i], P1, P2))
         opt_X = optimal_params.x
-        # opt_X = opt_X / opt_X[3]  # Normalize by the homogeneous coordinate
+        opt_X = opt_X / opt_X[3]  # Normalize by the homogeneous coordinate
         # opt_X = opt_X[:3]  # Remove the homogeneous coordinate
         optimal_X.append(opt_X)
 

@@ -9,10 +9,10 @@ from EstimateFundamentalMatrix import *
     
 def inlier_ransac(points1, points2, indexes, max_iterations, threshold, pair):
     best_inliers = []
-    points1 = np.array(points1)
-    points2 = np.array(points2)
-    points1 = np.concatenate((points1, np.ones((points1.shape[0], 1))), axis=1)
-    points2 = np.concatenate((points2, np.ones((points2.shape[0], 1))), axis=1)
+    points1_o = np.array(points1)
+    points2_o = np.array(points2)
+    points1 = np.concatenate((points1_o, np.ones((points1_o.shape[0], 1))), axis=1)
+    points2 = np.concatenate((points2_o, np.ones((points2_o.shape[0], 1))), axis=1)
     
     inlier_indexes = indexes
 
@@ -31,9 +31,16 @@ def inlier_ransac(points1, points2, indexes, max_iterations, threshold, pair):
         sample_points2 = np.array([points2[i] for i in sample_indices])
         
         # Estimate the fundamental matrix using the sampled points
+        # home grown
         fundamental_matrix = EstimateFundamentalMatrix(sample_points1, sample_points2)
+        # cv2
+        # fundamental_matrix, _inliers = cv2.findFundamentalMat(sample_points1, sample_points2)
         
-        result = points2 @ fundamental_matrix @ points1.T
+        try:
+            result = points2 @ fundamental_matrix @ points1.T
+        except:
+            print(points1.shape)
+            print(points2.shape)
 
         errors = np.abs(np.diag(result))
         inliers = np.where(errors < threshold)[0]
@@ -56,13 +63,16 @@ def inlier_ransac(points1, points2, indexes, max_iterations, threshold, pair):
     # Extract the inlier points from the original sets and convert them to lists
     inlier_points1 = [list(points1[i]) for i in best_inliers]
     inlier_points2 = [list(points2[i]) for i in best_inliers]
+    _inlier_points1 = np.array([[points1[i][0], points1[i][1] ] for i in best_inliers])
+    _inlier_points2 = np.array([[points2[i][0], points1[i][1] ] for i in best_inliers])
 
+    # homegrown
     fundamental_matrix = EstimateFundamentalMatrix(inlier_points1, inlier_points2)
+    # cv2
+    # fundamental_matrix, _inlier = cv2.findFundamentalMat(_inlier_points1, _inlier_points2)
 
     
     return best_F, inlier_points1, inlier_points2, [inlier_indexes[i] for i in best_inliers]
-
-
 
 
 def get_inliers_RANSAC(matched_points):

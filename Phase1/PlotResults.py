@@ -12,6 +12,7 @@ EPILINES_DIR = 'results/02_epilines/'
 INITIAL_TRIANGULATION_DIR = 'results/03_initial_triangulation/'
 TRIANGULATION_COMP_DIR = 'results/04_triangulation_comparison/'
 REPROJECTION_DIR = 'results/05_reprojection/'
+FINAL_POINT_CLOUD = 'results/06_point_cloud/'
 
 def make_output_dir():
     paths = [
@@ -20,7 +21,8 @@ def make_output_dir():
         EPILINES_DIR,
         INITIAL_TRIANGULATION_DIR,
         TRIANGULATION_COMP_DIR,
-        REPROJECTION_DIR
+        REPROJECTION_DIR,
+        FINAL_POINT_CLOUD,
     ]
     for path in paths:
         if not os.path.exists(path):
@@ -48,7 +50,6 @@ def plot_ransac_results(source_img, target_img, inlier_points1, inlier_points2):
     kp2 = [cv2.KeyPoint(pt[0], pt[1], 1) for pt in inlier_points2]
     
     dmatches = [cv2.DMatch(i, i,0) for i in range(len(inlier_points1))]
-    
     # Draw matches
     output_image_path = os.path.normpath(f'{RANSAC_DIR}{source_img}a{target_img}_inliers.png')
     output_image = cv2.drawMatches(img1, kp1, img2, kp2, dmatches, None, flags=cv2.DrawMatchesFlags_NOT_DRAW_SINGLE_POINTS)
@@ -192,3 +193,61 @@ def plot_reprojection(X_linear, X_nonlinear, points1, img1, C, R, K, img_number)
     plt.legend()
     plt.savefig(f'{REPROJECTION_DIR}{img_number}.png')
 
+
+
+def plot_point_cloud(X, R_stack, C_stack):
+    fig = plt.figure("Final Point Cloud X,Z")
+    ax = fig.add_subplot()
+    
+    # # Set axis limits
+    ax.set_xlim([-30, 30])
+    ax.set_ylim([-10, 30])
+    
+    # Plot linear and nonlinear triangulated points
+    ax.scatter(X[:, 0], X[:, 2], c="b", s=1, label="Final")
+    
+    # Draw cameras
+    # for rotation, position, label in zip() [(R1, C1, "1"), (R2, C2, "2")]:
+    #     # Convert rotation matrix to Euler angles
+    #     angles = Rotation.from_matrix(rotation).as_euler("XYZ")
+    #     angles_deg = np.rad2deg(angles)
+        
+    #     # Plot camera position
+    #     ax.plot(position[0], position[2], marker=(3, 0, int(angles_deg[1])), markersize=15, linestyle='None') 
+        
+    #     # Annotate camera with label
+    #     correction = -0.1
+    #     ax.annotate(label, xy=(position[0] + correction, position[2] + correction))
+    
+    # Set legend and display plot
+    ax.legend()
+    plt.savefig(f'{FINAL_POINT_CLOUD}final_point_cloudXZ.png')
+    plt.close()
+
+    fig = plt.figure("Final Point Cloud X,Y")
+    ax = fig.add_subplot()
+    
+    # # Set axis limits
+    ax.set_xlim([-30, 30])
+    ax.set_ylim([-10, 30])
+    
+    # Plot linear and nonlinear triangulated points
+    ax.scatter(X[:, 0], X[:, 1], c="b", s=1, label="Final")
+    
+    # Draw cameras
+    # for rotation, position, label in zip() [(R1, C1, "1"), (R2, C2, "2")]:
+    #     # Convert rotation matrix to Euler angles
+    #     angles = Rotation.from_matrix(rotation).as_euler("XYZ")
+    #     angles_deg = np.rad2deg(angles)
+        
+    #     # Plot camera position
+    #     ax.plot(position[0], position[2], marker=(3, 0, int(angles_deg[1])), markersize=15, linestyle='None') 
+        
+    #     # Annotate camera with label
+    #     correction = -0.1
+    #     ax.annotate(label, xy=(position[0] + correction, position[2] + correction))
+    
+    # Set legend and display plot
+    ax.legend()
+    plt.savefig(f'{FINAL_POINT_CLOUD}final_point_cloudXY.png')
+    plt.close()

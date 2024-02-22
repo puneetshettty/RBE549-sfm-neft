@@ -16,7 +16,7 @@ from DisambiguateCameraPose import DisambiguateCameraPose
 from NonlinearTriangulation import NonlinearTriangulation
 from PnPRANSAC import PnPRANSAC
 from NonLinearPnP import NonLinearPnP
-from PlotResults import plot_ransac_results,plot_reprojection,plot_triangulation_comparison, plot_epi_lines, plot_initial_triangulation, make_output_dir, plot_points
+from PlotResults import plot_ransac_results,plot_reprojection,plot_triangulation_comparison, plot_epi_lines, plot_initial_triangulation, make_output_dir, plot_points, plot_point_cloud
 from EstimateHomography import get_homography_ransac
 
 
@@ -238,7 +238,22 @@ class Main:
             # plot_ransac_results(source_img, target_img, points1, points2)
             
 
-            F, inlier_points1, inlier_points2, inlier_indexes_dict[pair] = inlier_ransac(points1, points2, indexes_dict[pair], 3000, 0.019, pair)
+            # F, inlier_points1, inlier_points2, inlier_indexes_dict[pair] = inlier_ransac(points1, points2, indexes_dict[pair], 3000, 0.019, pair)
+
+            ###########################
+            # Using cv2 findfundamental
+            #################
+            points1 = np.array(points1)
+            points2 = np.array(points2)
+            F, mask = cv2.findFundamentalMat(points1, points2)
+            inlier_points1 = np.array(points1)[mask.ravel() == 1].squeeze()
+            inlier_points2 = np.array(points2)[mask.ravel() == 1].squeeze()
+            inlier_points1 = np.array([(x,y,1) for (x,y) in inlier_points1])
+            inlier_points2 = np.array([(x,y,1) for (x,y) in inlier_points2])
+            print(inlier_points1.shape, inlier_points2.shape)
+            ####################
+            ####################
+
             # F, new_matches = get_inliers_RANSAC(self.matches[pair])
 
             # inlier_points1 = [match[0] for match in new_matches]
@@ -254,8 +269,8 @@ class Main:
             plot_epi_lines(source_img, target_img, subset_1, subset_2, F)
             
 
-            self.pairwise_inlier_points_1[pair] = inlier_points1
-            self.pairwise_inlier_points_2[pair] = inlier_points2
+            self.pairwise_inlier_points_1[pair] = inlier_points1.tolist()
+            self.pairwise_inlier_points_2[pair] = inlier_points2.tolist()
         
         print("Number of inliers for each pair")
         print([len(self.pairwise_inlier_points_1[pair]) for pair in self.target_pairs])
@@ -377,11 +392,6 @@ class Main:
 
             print("Calculating PnP RANSAC for pair", pair)
             r_new, c_new  = PnPRANSAC(world_coord, features_on_j, self.K, 10000, 200)
-            # print("c_new")
-            # pprint(c_new)
-            # print("r_new")
-            # pprint(r_new)
-            # print("Non Linear PnP for pair", pair)
             r_opt, c_opt = NonLinearPnP(world_coord, features_on_j, self.K, r_new, c_new)
             
             X_linear = LinearTriangulation(unique_feature_1, unique_feature_j, self.K, C1, R1, c_opt, r_opt)
@@ -391,14 +401,20 @@ class Main:
                                                 unique_feature_j,
                                                 X_linear)
 
+            X_nonlinear = [(x,y,z) for (x,y,z, _) in X_nonlinear]
             self.point_cloud.extend(X_nonlinear)
+            if pair not in self.pairwise_inlier_points_1:
+                self.pairwise_inlier_points_1[pair] = []
             self.pairwise_inlier_points_1[pair].extend(unique_feature_1)
 
             self.camera_translations.append(c_opt)
             self.camera_rotations.append(r_opt)
 
+    
+        self.point_cloud = np.array(self.point_cloud)   
+        print(len(self.point_cloud))
 
-            break
+        plot_point_cloud(self.point_cloud, self.camera_rotations, self.camera_rotations)
 
             # Do bundle adjustments
 
