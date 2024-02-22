@@ -2,6 +2,8 @@ import os
 import sys
 import glob
 import random
+import json
+from json import JSONEncoder
 
 import cv2
 import numpy as np
@@ -19,6 +21,18 @@ from NonLinearPnP import NonLinearPnP
 from PlotResults import plot_ransac_results,plot_reprojection,plot_triangulation_comparison, plot_epi_lines, plot_bundle_adjustment,plot_initial_triangulation, make_output_dir, plot_points, plot_point_cloud
 from EstimateHomography import get_homography_ransac
 from BundleAdjustment import BundleAdjustment
+
+np.set_printoptions(threshold=sys.maxsize)
+class NumpyArrayEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return super(NumpyArrayEncoder, self).default(obj)
 
 
 def projectionMatrix(R,C,K):
@@ -470,6 +484,9 @@ class Main:
             ####################
             self.feature_points = np.vstack((self.feature_points, np.zeros((len(unique_feature_1), num_cameras, 2))))
             self.feature_points[indices_on_world_proj,camera_index] = np.array(features_on_j)[:,0:2]
+            l2 = last_point_index_in_world_map + len(unique_feature_1)
+            self.feature_points[last_point_index_in_world_map:l2,0] = np.array(unique_feature_1)[:,0:2]
+            self.feature_points[last_point_index_in_world_map:l2,camera_index] = np.array(unique_feature_j)[:,0:2]
 
             ####################
             ####################
@@ -479,7 +496,7 @@ class Main:
             ####################
             # # Adding regions of (1, j) to the world map index pairs
             # world_map_index_pairs[camera_index][0] = last_point_index_in_world_map
-            # last_point_index_in_world_map = last_point_index_in_world_map + len(unique_feature_1)
+            last_point_index_in_world_map = last_point_index_in_world_map + len(unique_feature_1)
             # world_map_index_pairs[camera_index][1] = last_point_index_in_world_map
             ####################
             ####################
@@ -495,6 +512,9 @@ class Main:
         # for line in point_visibility_map:
         #     print(line)
         # pprint(world_map_index_pairs)
+
+        encodedNumpyData = json.dumps(point_visibility_map, cls=NumpyArrayEncoder)  # use dump() to write array into file
+        json.dump(encodedNumpyData, open('results/point_visibility_map.json', 'w'))
 
         print("feature map")
         pprint(self.feature_points.shape)
