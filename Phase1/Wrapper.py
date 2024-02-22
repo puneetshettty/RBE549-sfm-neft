@@ -16,8 +16,9 @@ from DisambiguateCameraPose import DisambiguateCameraPose
 from NonlinearTriangulation import NonlinearTriangulation
 from PnPRANSAC import PnPRANSAC
 from NonLinearPnP import NonLinearPnP
-from PlotResults import plot_ransac_results,plot_reprojection,plot_triangulation_comparison, plot_epi_lines, plot_initial_triangulation, make_output_dir, plot_points, plot_point_cloud
+from PlotResults import plot_ransac_results,plot_reprojection,plot_triangulation_comparison, plot_epi_lines, plot_bundle_adjustment,plot_initial_triangulation, make_output_dir, plot_points, plot_point_cloud
 from EstimateHomography import get_homography_ransac
+from BundleAdjustment import BundleAdjustment
 
 
 def projectionMatrix(R,C,K):
@@ -69,7 +70,8 @@ def ReProjectionError(X,pts1, pts2, C1, R1, C2, R2, K):
 def reprojectionErrorPnP(x3D, pts, K, R, C):
     P = projectionMatrix(R,C,K)
     # print("P :",P)
-    
+    print("x3D",x3D.shape)
+    x3D = np.concatenate((x3D, np.ones((x3D.shape[0], 1))), axis=1)
     Error = []
     for X, pt in zip(x3D, pts):
 
@@ -319,8 +321,6 @@ class Main:
         
         X_linear = LinearTriangulation(self.pairwise_inlier_points_1[pair], self.pairwise_inlier_points_2[pair],
                 self.K, C1, R1, C_linear, R_linear)
-            
-            
 
         X_nonlinear = NonlinearTriangulation(self.K, C1, R1, C_linear, R_linear, 
                                                 self.pairwise_inlier_points_1[pair],
@@ -328,6 +328,11 @@ class Main:
                                                 X_linear)
 
         plot_triangulation_comparison(X_linear,X_nonlinear,R_linear, C_linear,R1,C1, source_img, target_img)
+
+        print("Linear Error")
+        print(ReProjectionError(X_linear, self.pairwise_inlier_points_1[pair], self.pairwise_inlier_points_2[pair], C1, R1, C_linear, R_linear, self.K))
+        print("Non-Linear Error")
+        print(ReProjectionError(X_nonlinear, self.pairwise_inlier_points_1[pair], self.pairwise_inlier_points_2[pair], C1, R1, C_linear, R_linear, self.K))
 
         img1_path = f'./P3Data/{source_img}.png'
         img1 = cv2.imread(img1_path, cv2.COLOR_BGR2RGB)
@@ -351,10 +356,11 @@ class Main:
         indices_on_world_proj = np.where(mask == True)[0]
         indices_on_world_proj = np.unique(indices_on_world_proj) 
         world_coord_match = world_coord[indices_on_world_proj]
-        # print("world_coord_match",world_coord_match.shape)
-        # print("indices_on_world_proj",indices_on_world_proj.shape)
-        # print("indices_on_world_proj",indices_on_world_proj)
-        # print("features_on_1",features_on_1.shape)
+        
+        print("world_coord_match",world_coord_match.shape)
+        print("indices_on_world_proj",indices_on_world_proj.shape)
+        print("indices_on_world_proj",indices_on_world_proj)
+        print("features_on_1",features_on_1.shape)
 
         world_projected_to_1_matched_with_j = world_proj_to_1[indices_on_world_proj] 
 
@@ -373,26 +379,63 @@ class Main:
         unique_feature_j = features_on_j[indices_of_new_features_on_j]
 
 
-        return world_coord_match, features_on_j_match, unique_feature_1, unique_feature_j
+        return world_coord_match, features_on_j_match, unique_feature_1, unique_feature_j, indices_on_world_proj
 
 
     def apply_pnp(self):
-        world_to_1_map = self.pairwise_inlier_points_1['1a2']
+        world_to_1_map = list(self.pairwise_inlier_points_1['1a2'])
 
+        num_cameras = (1 + len(self.target_pairs))  
+
+        # this is (points, cameras) array of 0 or 1 indicating if camera saw the point
+        point_visibility_map = np.zeros((len(world_to_1_map), num_cameras))
+        
+        points_count, cameras_count = np.shape(point_visibility_map)
+        self.feature_points = np.zeros((points_count, cameras_count, 2))
+
+        for world_index in range(len(world_to_1_map)):
+            # Visible in 1st and 2nd camera by construction
+            point_visibility_map[world_index][0] = 1 
+            point_visibility_map[world_index][1] = 1
+
+            self.feature_points[world_index][0] = world_to_1_map[world_index][0:2]
+            self.feature_points[world_index][1] = self.pairwise_inlier_points_2['1a2'][world_index][0:2]
+
+        # Stores the [start, end) for camera ci as [c1] = [start, end)
+        # world_map_index_pairs = np.zeros((num_cameras, 2))
+        # # all the points currently are the matches of 1 and 2
+        # world_map_index_pairs[0][0] = 0
+        # world_map_index_pairs[0][1] = len(world_to_1_map)
+        # world_map_index_pairs[1][0] = 0
+        # world_map_index_pairs[1][1] = len(world_to_1_map)
+
+        last_point_index_in_world_map = len(world_to_1_map)
+            
         C1 = self.camera_translations[0]
         R1 = self.camera_rotations[0]
 
         # Skip 1a2
         for pair in self.target_pairs[1:]: 
+            _, camera_index = map(int, [pair[0], pair[2]])
+            print("Adding points from camera ", camera_index )
+            camera_index -= 1
             match_with_1 = self.pairwise_inlier_points_1[pair] 
             match_on_jth_image = self.pairwise_inlier_points_2[pair]
 
-            world_coord, features_on_j, unique_feature_1, unique_feature_j = self.find_matching_pairs(self.point_cloud, world_to_1_map, match_with_1, match_on_jth_image)
+            world_coord, features_on_j,unique_feature_1, unique_feature_j, indices_on_world_proj = self.find_matching_pairs(
+                self.point_cloud, world_to_1_map, match_with_1, match_on_jth_image)
 
+            print("new_inlier_matches", len(match_on_jth_image))
+            print("unique new features", len(unique_feature_j))
 
             print("Calculating PnP RANSAC for pair", pair)
-            r_new, c_new  = PnPRANSAC(world_coord, features_on_j, self.K, 10000, 200)
+            r_new, c_new = PnPRANSAC(world_coord, features_on_j, self.K, 10000, 100)
+            
+            error = reprojectionErrorPnP(world_coord, features_on_j, self.K, r_new, c_new)
+            print("Reprojection error for PnP RANSAC", error)
+
             r_opt, c_opt = NonLinearPnP(world_coord, features_on_j, self.K, r_new, c_new)
+
             
             X_linear = LinearTriangulation(unique_feature_1, unique_feature_j, self.K, C1, R1, c_opt, r_opt)
             
@@ -402,22 +445,88 @@ class Main:
                                                 X_linear)
 
             X_nonlinear = [(x,y,z) for (x,y,z, _) in X_nonlinear]
+
             self.point_cloud.extend(X_nonlinear)
-            if pair not in self.pairwise_inlier_points_1:
-                self.pairwise_inlier_points_1[pair] = []
-            self.pairwise_inlier_points_1[pair].extend(unique_feature_1)
+            world_to_1_map.extend(unique_feature_1)
+            
+            ####################
+            # Generate Visibility Matrix
+            ####################
+            point_visibility_map = np.vstack((point_visibility_map, np.zeros((len(unique_feature_1), num_cameras))))
+            for point in range(last_point_index_in_world_map, len(world_to_1_map)):
+                point_visibility_map[point][0] = 1 # mark camera 1 as visible
+                point_visibility_map[point][camera_index] = 1 # mark camera j as visible
+
+            # For each point matched in 1 and j
+            for world_1_index in indices_on_world_proj:
+                point_visibility_map[world_1_index][camera_index] = 1
+            print("visibility_map shape")
+            print(np.shape(point_visibility_map))
+            ####################
+            ####################
+            
+            ####################
+            # Generate Feature Points
+            ####################
+            self.feature_points = np.vstack((self.feature_points, np.zeros((len(unique_feature_1), num_cameras, 2))))
+            self.feature_points[indices_on_world_proj,camera_index] = np.array(features_on_j)[:,0:2]
+
+            ####################
+            ####################
+
+            ####################
+            # add 
+            ####################
+            # # Adding regions of (1, j) to the world map index pairs
+            # world_map_index_pairs[camera_index][0] = last_point_index_in_world_map
+            # last_point_index_in_world_map = last_point_index_in_world_map + len(unique_feature_1)
+            # world_map_index_pairs[camera_index][1] = last_point_index_in_world_map
+            ####################
+            ####################
+
+            # if pair not in self.pairwise_inlier_points_1:
+            #     self.pairwise_inlier_points_1[pair] = []
+            # self.pairwise_inlier_points_1[pair].extend(unique_feature_1)
 
             self.camera_translations.append(c_opt)
             self.camera_rotations.append(r_opt)
+        
+        # print("point_visibility_map")
+        # for line in point_visibility_map:
+        #     print(line)
+        # pprint(world_map_index_pairs)
 
-    
+        print("feature map")
+        pprint(self.feature_points.shape)
+
         self.point_cloud = np.array(self.point_cloud)   
-        print(len(self.point_cloud))
+        # print(len(self.point_cloud))
 
         plot_point_cloud(self.point_cloud, self.camera_rotations, self.camera_rotations)
 
+        self.visibility_matrix = point_visibility_map.T
+
+        self.world_to_1_map = world_to_1_map
             # Do bundle adjustments
 
+    def do_bundle_adjustment(self):
+        # print("sizes")
+        point_cloud = np.array(self.point_cloud)
+        world_to_1_map = np.array(self.world_to_1_map)
+        
+        visibility_matrix = self.visibility_matrix.T
+        # print(self.visibility_matrix)
+        # print(point_cloud)
+        # print(world_to_1_map)
+
+        points_count, cameras_count = np.shape(visibility_matrix)
+        # point, camera, proj(x,y)
+        pprint(self.feature_points)
+
+        self.optim_R_set, self.optim_C_set, self.optim_world_coords = BundleAdjustment(visibility_matrix, point_cloud, self.feature_points, self.camera_rotations, self.camera_translations, self.K, len(self.target_pairs)+1)
+
+        plot_bundle_adjustment(self.optim_world_coords,self.optim_R_set, self.optim_C_set)
+        
 
 if __name__ == "__main__":
     make_output_dir()
@@ -430,3 +539,4 @@ if __name__ == "__main__":
     main.extract_camera_pose()
     main.triangulate_and_fix_camera_pose()
     main.apply_pnp()
+    main.do_bundle_adjustment()

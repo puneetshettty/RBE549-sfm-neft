@@ -26,7 +26,17 @@ def LinearTriangulation(points1, points2, K, C1, R1, C2, R2):
                             [pt2[2], 0, -pt2[0]],
                             [-pt2[1], pt2[0], 0]])
         
-        A = np.vstack((skew_1 @ P1, skew_2 @ P2))
+        # A = np.vstack((skew_1 @ P1, skew_2 @ P2))
+
+        u1, v1 = pt1[0:2]
+        u2, v2 = pt2[0:2]
+
+        A = np.array([
+            v1 * P1[2, :] - P1[1, :],
+            P1[0, :] - u1 * P1[2, :],
+            v2 * P2[2, :] - P2[1, :],
+            P2[0, :] - u2 * P2[2, :],
+        ])
 
         U, S, VT = np.linalg.svd(A)
         
@@ -37,6 +47,6 @@ def LinearTriangulation(points1, points2, K, C1, R1, C2, R2):
         X.append(Xt)
     
     # TODO what does this line do?
-    X = np.vstack(X)
+    X = np.array(X)
 
     return X

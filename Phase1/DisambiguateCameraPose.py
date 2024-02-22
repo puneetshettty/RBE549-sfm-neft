@@ -16,11 +16,16 @@ def DisambiguateCameraPose(Cstack, Rstack, Xstack):
         condition2 = r3 @ (X - C).T
 
         inliers = (condition1 > 0) & (condition2 > 0)
+        # inliers = (condition2 > 0)
 
         if np.sum(inliers) > np.sum(max_inliers):
             final_C = C
             final_R = R
             final_X = X[inliers]
             max_inliers = inliers
+
+    print("disambiguation")
+    print(len(max_inliers))
+    print(len(Xstack[0]))
 
     return final_C.flatten(), final_R, final_X 

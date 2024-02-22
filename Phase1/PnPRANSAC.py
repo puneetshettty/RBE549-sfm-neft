@@ -1,4 +1,5 @@
 import numpy as np
+import random
 from LinearPnP import LinearPnP
 
 def PnPRANSAC(world_points, imgj_features, K, max_iterations, threshold):
@@ -36,6 +37,8 @@ def PnPRANSAC(world_points, imgj_features, K, max_iterations, threshold):
 
             # Compute reprojection error
             error = np.linalg.norm(np.array([u, v]) - np.array([u_projected, v_projected]))
+
+            # print(f"Error: {error}")
             
             if error < threshold:
                 inliers += 1
@@ -54,4 +57,64 @@ def PnPRANSAC(world_points, imgj_features, K, max_iterations, threshold):
 
     return final_R, final_C
 
+# def reprojectionErrorPerPoint(imgPoint,worldPoint,K,P):
+#     assert worldPoint.shape == (4,1)
+#     assert imgPoint.shape == (3,1)
+#     p1_1t = P[0, :].reshape(1, 4)
+#     p1_2t = P[1, :].reshape(1, 4)
+#     p1_3t = P[2, :].reshape(1, 4)
+#     u1, v1, _ = imgPoint
+#     error = (u1-(np.matmul(p1_1t, worldPoint))/(np.matmul(p1_3t, worldPoint)))**2
+#     + (v1-(np.matmul(p1_2t, worldPoint))/(np.matmul(p1_3t, worldPoint)))**2
+#     return error
 
+
+# # def PnPRANSAC(world_points, imgj_features, K, max_iterations, threshold):
+# def PnPRANSAC(X_all,points,K, max_i, threshold):
+#     '''
+#     Input:
+#         points: np.ndarray (N,3)
+#         X_all: np.ndarray (N,3)
+#         K: np.ndarray (3,3)
+#     Output:
+#         R: np.ndarray (3,3)
+#         C: np.ndarray (3,1)
+#         inliers: np.ndarray (N,3)
+#         X: np.ndarray (N,3)
+#         points: np.ndarray (N,2)
+#         inliers: np.ndarray (N,1)'''
+#     print(points[1])
+#     print(X_all[1])
+#     points = np.array(points)[:,:2]
+#     X_all = np.array(X_all)[:,:3]
+#     assert points.shape[1] == 2
+#     assert X_all.shape[1] == 3
+#     X_h = np.concatenate((X_all, np.ones((X_all.shape[0], 1))), axis=1)
+#     points_h = np.concatenate((points, np.ones((points.shape[0], 1))), axis=1)
+#     num_iterations = 5000
+#     threshold = 100
+#     max_inliers = []
+#     for i in range(num_iterations):
+#         random_indices = random.sample(range(len(points_h)), 6)
+#         points_random = points_h[random_indices]
+#         X_random = X_h[random_indices]
+#         # R,C = LinearPnP(points_random,X_random,K)
+#         R,C = LinearPnP(X_random,points_random,K)
+#         P = np.dot(K,np.dot(R,np.hstack((np.eye(3),-C))))
+#         inliers = []
+#         for i in range(len(points_h)):
+#             point = points_h[i]
+#             X= X_h[i]
+#             error = reprojectionErrorPerPoint(point.reshape(3,1),X.reshape(4,1),K,P)
+
+#             if error < threshold:
+#                 inliers.append(i)
+#         if len(inliers) > len(max_inliers):
+#             max_inliers = inliers
+#     best_kp = points[max_inliers]
+#     best_X = X_all[max_inliers]
+#     # R,C = LinearPnP(best_kp,best_X,K)
+#     R,C = LinearPnP(best_X,best_kp, K)
+#     C= C.reshape((3,1))
+    
+#     return R,C,best_kp,best_X, max_inliers

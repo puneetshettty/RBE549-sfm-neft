@@ -13,6 +13,7 @@ INITIAL_TRIANGULATION_DIR = 'results/03_initial_triangulation/'
 TRIANGULATION_COMP_DIR = 'results/04_triangulation_comparison/'
 REPROJECTION_DIR = 'results/05_reprojection/'
 FINAL_POINT_CLOUD = 'results/06_point_cloud/'
+BUNDLE = 'results/07_bundle/'
 
 def make_output_dir():
     paths = [
@@ -23,6 +24,7 @@ def make_output_dir():
         TRIANGULATION_COMP_DIR,
         REPROJECTION_DIR,
         FINAL_POINT_CLOUD,
+        BUNDLE,
     ]
     for path in paths:
         if not os.path.exists(path):
@@ -159,6 +161,34 @@ def plot_triangulation_comparison(X_linear, X_nonlinear, R1, C1, R2, C2, source,
     plt.savefig(f'{TRIANGULATION_COMP_DIR}{source}a{target}.png')
     plt.close()
 
+def plot_bundle_adjustment(X,R_stack, C_stack):
+    fig = plt.figure("Bundle Adjustment")
+    ax = fig.add_subplot()
+    
+    # # Set axis limits
+    ax.set_xlim([-30, 30])
+    ax.set_ylim([-10, 30])
+    
+    # Plot linear and nonlinear triangulated points
+    ax.scatter(X[:, 0], X[:, 2], c="b", s=1, label="Bundle")
+    
+    # Draw cameras
+    for rotation, position, label in zip(R_stack, C_stack, range(1, len(R_stack)+1)):
+        # Convert rotation matrix to Euler angles
+        angles = Rotation.from_matrix(rotation).as_euler("XYZ")
+        angles_deg = np.rad2deg(angles)
+        
+        # Plot camera position
+        ax.plot(position[0], position[2], marker=(3, 0, int(angles_deg[1])), markersize=15, linestyle='None') 
+        
+        # Annotate camera with label
+        correction = -0.1
+        ax.annotate(label, xy=(position[0] + correction, position[2] + correction))
+    
+    # Set legend and display plot
+    ax.legend()
+    plt.savefig(f'{BUNDLE}bundle.png')
+    plt.close()
 
 def plot_reprojection(X_linear, X_nonlinear, points1, img1, C, R, K, img_number):
     # Compute the camera projection matrix
