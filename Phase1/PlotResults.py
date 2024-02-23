@@ -115,3 +115,127 @@ def plot_triangulation_comparison(X_linear, X_nonlinear, R1, C1, R2, C2, source,
     ax.legend()
     plt.savefig(f'results/triangulation_{source}a{target}.png')
     plt.close()
+<<<<<<< Updated upstream
+=======
+
+def plot_bundle_adjustment(X,R_stack, C_stack):
+    fig = plt.figure("Bundle Adjustment")
+    ax = fig.add_subplot()
+    
+    # # Set axis limits
+    ax.set_xlim([-30, 30])
+    ax.set_ylim([-10, 30])
+    
+    # Plot linear and nonlinear triangulated points
+    ax.scatter(X[:, 0], X[:, 2], c="b", s=1, label="Bundle")
+    
+    # Draw cameras
+    for rotation, position, label in zip(R_stack, C_stack, range(1, len(R_stack)+1)):
+        # Convert rotation matrix to Euler angles
+        angles = Rotation.from_matrix(rotation).as_euler("XYZ")
+        angles_deg = np.rad2deg(angles)
+        
+        # Plot camera position
+        ax.plot(position[0], position[2], marker=(3, 0, int(angles_deg[1])), markersize=15, linestyle='None') 
+        
+        # Annotate camera with label
+        correction = -0.1
+        ax.annotate(label, xy=(position[0] + correction, position[2] + correction))
+    
+    # Set legend and display plot
+    ax.legend()
+    # plt.savefig(f'{BUNDLE}bundle.png')
+    plt.close()
+
+def plot_reprojection(X_linear, X_nonlinear, points1, img1, C, R, K, img_number):
+    # Compute the camera projection matrix
+    points1 = np.array(points1)
+    X_linear = np.concatenate((X_linear, np.ones((X_linear.shape[0], 1))), axis=1)
+    # X_nonlinear = np.concatenate((X_nonlinear, np.ones((X_nonlinear.shape[0], 1))), axis=1)
+    C = C.reshape(3, 1)
+    I = np.eye(3)
+    P = np.dot(K, np.dot(R, np.hstack((I, -C))))
+
+    # Project 3D points onto the image plane
+    proj_linear = np.dot(P, X_linear.T)
+    proj_nonlinear = np.dot(P, X_nonlinear.T)
+
+    # Normalize homogeneous coordinates
+    proj_linear_norm = proj_linear[:2] / proj_linear[2]
+    proj_nonlinear_norm = proj_nonlinear[:2] / proj_nonlinear[2]
+
+    # Plot the image with reprojections
+    fig = plt.figure(figsize=(10, 6))
+    ax = fig.add_subplot()
+    ax.set_xlim([0, 800])
+    ax.set_ylim([600, 0])
+    img1 = cv2.cvtColor(img1, cv2.COLOR_BGR2RGB)
+    ax.imshow(img1)
+    ax.scatter(proj_linear_norm[0], proj_linear_norm[1], c='r', marker='o',label='Linear Triangulation', s=2)
+    ax.scatter(proj_nonlinear_norm[0], proj_nonlinear_norm[1], c='b', marker='x', label='Nonlinear Triangulation', s =3)
+    ax.scatter(points1[:, 0], points1[:, 1], c='g', marker='s', label='Detected Features', s=1)
+    plt.xlabel('X')
+    plt.ylabel('Y')
+    plt.title('Reprojection of 3D Points onto Image Plane')
+    plt.legend()
+    plt.savefig(f'{REPROJECTION_DIR}{img_number}.png')
+
+
+
+def plot_point_cloud(X, R_stack, C_stack):
+    fig = plt.figure("Final Point Cloud X,Z")
+    ax = fig.add_subplot()
+    
+    # # Set axis limits
+    ax.set_xlim([-30, 30])
+    ax.set_ylim([-10, 30])
+    
+    # Plot linear and nonlinear triangulated points
+    ax.scatter(X[:, 0], X[:, 2], c="b", s=1, label="Final")
+    
+    # Draw cameras
+    # for rotation, position, label in zip() [(R1, C1, "1"), (R2, C2, "2")]:
+    #     # Convert rotation matrix to Euler angles
+    #     angles = Rotation.from_matrix(rotation).as_euler("XYZ")
+    #     angles_deg = np.rad2deg(angles)
+        
+    #     # Plot camera position
+    #     ax.plot(position[0], position[2], marker=(3, 0, int(angles_deg[1])), markersize=15, linestyle='None') 
+        
+    #     # Annotate camera with label
+    #     correction = -0.1
+    #     ax.annotate(label, xy=(position[0] + correction, position[2] + correction))
+    
+    # Set legend and display plot
+    ax.legend()
+    plt.savefig(f'{FINAL_POINT_CLOUD}final_point_cloudXZ.png')
+    plt.close()
+
+    fig = plt.figure("Final Point Cloud X,Y")
+    ax = fig.add_subplot()
+    
+    # # Set axis limits
+    ax.set_xlim([-30, 30])
+    ax.set_ylim([-10, 30])
+    
+    # Plot linear and nonlinear triangulated points
+    ax.scatter(X[:, 0], X[:, 1], c="b", s=1, label="Final")
+    
+    # Draw cameras
+    # for rotation, position, label in zip() [(R1, C1, "1"), (R2, C2, "2")]:
+    #     # Convert rotation matrix to Euler angles
+    #     angles = Rotation.from_matrix(rotation).as_euler("XYZ")
+    #     angles_deg = np.rad2deg(angles)
+        
+    #     # Plot camera position
+    #     ax.plot(position[0], position[2], marker=(3, 0, int(angles_deg[1])), markersize=15, linestyle='None') 
+        
+    #     # Annotate camera with label
+    #     correction = -0.1
+    #     ax.annotate(label, xy=(position[0] + correction, position[2] + correction))
+    
+    # Set legend and display plot
+    ax.legend()
+    plt.savefig(f'{FINAL_POINT_CLOUD}final_point_cloudXY.png')
+    plt.close()
+>>>>>>> Stashed changes

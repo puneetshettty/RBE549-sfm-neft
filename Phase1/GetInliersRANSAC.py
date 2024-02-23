@@ -26,10 +26,17 @@ def inlier_ransac(points1, points2, indexes, max_iterations, threshold):
         sample_points2 = np.array([points2[i] for i in sample_indices])
         
         # Estimate the fundamental matrix using the sampled points
+<<<<<<< Updated upstream
         # fundamental_matrix = EstimateFundamentalMatrix(sample_points1, sample_points2)
         sample_points1 = sample_points1.reshape(-1, 1, 3)
         sample_points2 = sample_points2.reshape(-1, 1, 3)
         fundamental_matrix = EstimateFundamentalMatrix_7(sample_points1, sample_points2)
+=======
+        # home grown
+        fundamental_matrix= EstimateFundamentalMatrix(sample_points1, sample_points2)
+        # cv2
+        # fundamental_matrix, _inliers = cv2.findFundamentalMat(sample_points1, sample_points2)
+>>>>>>> Stashed changes
         
         # Compute the error for all points
         errors = np.abs(np.sum(points2 * (fundamental_matrix @ np.array(points1).T).T, axis=1))
@@ -46,6 +53,17 @@ def inlier_ransac(points1, points2, indexes, max_iterations, threshold):
     # Extract the inlier points from the original sets and convert them to lists
     inlier_points1 = [list(points1[i]) for i in best_inliers]
     inlier_points2 = [list(points2[i]) for i in best_inliers]
+<<<<<<< Updated upstream
+=======
+    _inlier_points1 = np.array([[points1[i][0], points1[i][1] ] for i in best_inliers])
+    _inlier_points2 = np.array([[points2[i][0], points1[i][1] ] for i in best_inliers])
+
+    # homegrown
+    # fundamental_matrix = EstimateFundamentalMatrix(inlier_points1, inlier_points2)
+    # cv2
+    # fundamental_matrix, _inlier = cv2.findFundamentalMat(_inlier_points1, _inlier_points2)
+
+>>>>>>> Stashed changes
     
     return fundamental_matrix, inlier_points1, inlier_points2, [inlier_indexes[i] for i in best_inliers]
 

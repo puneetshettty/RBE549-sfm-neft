@@ -2,13 +2,19 @@ import os
 import sys
 import glob
 import random
-
+import json
+from json import JSONEncoder
 import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
 from pprint import pprint
+<<<<<<< Updated upstream
 from GetInliersRANSAC import inlier_ransac
+=======
+from GetInliersRANSAC import inlier_ransac, get_inliers_RANSAC
+from EstimateFundamentalMatrix import *
+>>>>>>> Stashed changes
 from EssentialMatrixFromFundamentalMatrix import EssentialMatrixFromFundamentalMatrix
 from ExtractCameraPose import ExtractCameraPose
 from LinearTriangulation import LinearTriangulation
@@ -18,6 +24,18 @@ from PnPRANSAC import PnPRANSAC
 from NonLinearPnP import NonLinearPnP
 from PlotResults import plot_ransac_results,plot_reprojection,plot_triangulation_comparison, plot_epi_lines
 
+
+np.set_printoptions(threshold=sys.maxsize)
+class NumpyArrayEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        else:
+            return super(NumpyArrayEncoder, self).default(obj)
 
 def projectionMatrix(R,C,K):
     C = np.reshape(C,(3,1))
@@ -68,7 +86,13 @@ def ReProjectionError(X,pts1, pts2, C1, R1, C2, R2, K):
 def reprojectionErrorPnP(x3D, pts, K, R, C):
     P = projectionMatrix(R,C,K)
     # print("P :",P)
+<<<<<<< Updated upstream
     
+=======
+    print("x3D",x3D.shape)
+    # pts = pts[:,0:2]
+    x3D = np.concatenate((x3D, np.ones((x3D.shape[0], 1))), axis=1)
+>>>>>>> Stashed changes
     Error = []
     for X, pt in zip(x3D, pts):
 
@@ -199,14 +223,58 @@ class Main:
                 indexes_dict[indexes_key].append(i)  # Append the index to the corresponding list
             
 
+<<<<<<< Updated upstream
             F, inlier_points1, inlier_points2, inlier_indexes_dict[indexes_key] = inlier_ransac(points1, points2, indexes_dict[indexes_key], 1000, 0.1)
             self.fundamental_matrices[indexes_key] = F
+=======
+            F_our, inlier_points1, inlier_points2, inlier_indexes_dict[pair] = inlier_ransac(points1, points2, indexes_dict[pair], 100, 0.019, pair)
+            # F_our, inlier_points1, inlier_points2 = EstimateFundamentalMatrix_(source_img, target_img, points1, points2)
+
+            ###########################
+            # Using cv2 findfundamental
+            #################
+            points1 = np.array(points1)
+            points2 = np.array(points2)
+            F, mask = cv2.findFundamentalMat(points1, points2)
+            inlier_points1 = np.array(points1)[mask.ravel() == 1].squeeze()
+            inlier_points2 = np.array(points2)[mask.ravel() == 1].squeeze()
+            inlier_points1 = np.array([(x,y,1) for (x,y) in inlier_points1])
+            inlier_points2 = np.array([(x,y,1) for (x,y) in inlier_points2])
+            # print(inlier_points1.shape, inlier_points2.shape)
+            # print("F for our method")
+            # pprint(F_our)
+            # print("F for cv2 method")
+            # pprint(F)
+            ####################
+            ####################
+
+            # F, new_matches = get_inliers_RANSAC(self.matches[pair])
+
+            # inlier_points1 = [match[0] for match in new_matches]
+            # inlier_points2 = [match[1] for match in new_matches]
+
+            self.fundamental_matrices[pair] = F_our
+>>>>>>> Stashed changes
             # Load images
             self.pairwise_inlier_points_1[pair] = inlier_points1
             self.pairwise_inlier_points_2[pair] = inlier_points2
             plot_ransac_results(source_img, target_img, inlier_points1, inlier_points2)
 
+<<<<<<< Updated upstream
             plot_epi_lines(source_img, target_img, points1, points2, F)
+=======
+            subset_1 = [(x,y) for (x,y,z) in inlier_points1]
+            subset_2 = [(x,y) for (x,y,z) in inlier_points2]
+
+            plot_epi_lines(source_img, target_img, subset_1, subset_2, F_our)
+            
+
+            self.pairwise_inlier_points_1[pair] = inlier_points1#.tolist()
+            self.pairwise_inlier_points_2[pair] = inlier_points2#.tolist()
+        
+        print("Number of inliers for each pair")
+        print([len(self.pairwise_inlier_points_1[pair]) for pair in self.target_pairs])
+>>>>>>> Stashed changes
 
 
     def drawlines(self,img1,lines,pts1,pts2):
@@ -336,5 +404,144 @@ main.triangulate_and_fix_camera_pose()
 
 # R_nlpnp, C_nlpnp = NonLinearPnP(X_positive, points1_positive, K, R_lpnp, C_lpnp)
 
+<<<<<<< Updated upstream
 # error_nlpnp = reprojectionErrorPnP(X_positive, points1_positive, K, R_nlpnp, C_nlpnp)
 # print(f"Mean reprojection error for Nonlinear PnP: {np.mean(error_nlpnp)}")
+=======
+        last_point_index_in_world_map = len(world_to_1_map)
+            
+        C1 = self.camera_translations[0]
+        R1 = self.camera_rotations[0]
+
+        # Skip 1a2
+        for pair in self.target_pairs[1:]: 
+            _, camera_index = map(int, [pair[0], pair[2]])
+            print("Adding points from camera ", camera_index )
+            camera_index -= 1
+            match_with_1 = self.pairwise_inlier_points_1[pair] 
+            match_on_jth_image = self.pairwise_inlier_points_2[pair]
+
+            world_coord, features_on_j,unique_feature_1, unique_feature_j, indices_on_world_proj = self.find_matching_pairs(
+                self.point_cloud, world_to_1_map, match_with_1, match_on_jth_image)
+
+            print("new_inlier_matches", len(match_on_jth_image))
+            print("unique new features", len(unique_feature_j))
+
+            print("Calculating PnP RANSAC for pair", pair)
+            r_new, c_new = PnPRANSAC(world_coord, features_on_j, self.K, 1000, 100)
+            
+            # error = reprojectionErrorPnP(world_coord, features_on_j, self.K, r_new, c_new)
+            # print("Reprojection error for PnP RANSAC", error)
+
+            r_opt, c_opt = NonLinearPnP(world_coord, features_on_j, self.K, r_new, c_new)
+
+            
+            X_linear = LinearTriangulation(unique_feature_1, unique_feature_j, self.K, C1, R1, c_opt, r_opt)
+            
+            X_nonlinear = NonlinearTriangulation(self.K, C1, R1, c_opt, r_opt, 
+                                                unique_feature_1,
+                                                unique_feature_j,
+                                                X_linear)
+
+            X_nonlinear = [(x,y,z) for (x,y,z, _) in X_nonlinear]
+
+            self.point_cloud.extend(X_nonlinear)
+            world_to_1_map.extend(unique_feature_1)
+            
+            ####################
+            # Generate Visibility Matrix
+            ####################
+            point_visibility_map = np.vstack((point_visibility_map, np.zeros((len(unique_feature_1), num_cameras))))
+            for point in range(last_point_index_in_world_map, len(world_to_1_map)):
+                point_visibility_map[point][0] = 1 # mark camera 1 as visible
+                point_visibility_map[point][camera_index] = 1 # mark camera j as visible
+
+            # For each point matched in 1 and j
+            for world_1_index in indices_on_world_proj:
+                point_visibility_map[world_1_index][camera_index] = 1
+            print("visibility_map shape")
+            print(np.shape(point_visibility_map))
+            ####################
+            ####################
+            
+            ####################
+            # Generate Feature Points
+            ####################
+            self.feature_points = np.vstack((self.feature_points, np.zeros((len(unique_feature_1), num_cameras, 2))))
+            self.feature_points[indices_on_world_proj,camera_index] = np.array(features_on_j)[:,0:2]
+            l2 = last_point_index_in_world_map + len(unique_feature_1)
+            self.feature_points[last_point_index_in_world_map:l2,0] = np.array(unique_feature_1)[:,0:2]
+            self.feature_points[last_point_index_in_world_map:l2,camera_index] = np.array(unique_feature_j)[:,0:2]
+
+            ####################
+            ####################
+
+            ####################
+            # add 
+            ####################
+            # # Adding regions of (1, j) to the world map index pairs
+            # world_map_index_pairs[camera_index][0] = last_point_index_in_world_map
+            last_point_index_in_world_map = last_point_index_in_world_map + len(unique_feature_1)
+            # world_map_index_pairs[camera_index][1] = last_point_index_in_world_map
+            ####################
+            ####################
+
+            # if pair not in self.pairwise_inlier_points_1:
+            #     self.pairwise_inlier_points_1[pair] = []
+            # self.pairwise_inlier_points_1[pair].extend(unique_feature_1)
+
+            self.camera_translations.append(c_opt)
+            self.camera_rotations.append(r_opt)
+        
+        # print("point_visibility_map")
+        # for line in point_visibility_map:
+        #     print(line)
+        # pprint(world_map_index_pairs)
+        encodedNumpyData = json.dumps(point_visibility_map, cls=NumpyArrayEncoder)  # use dump() to write array into file
+        json.dump(encodedNumpyData, open('results/point_visibility_map.json', 'w'))
+
+        print("feature map")
+        pprint(self.feature_points.shape)
+
+        self.point_cloud = np.array(self.point_cloud)   
+        # print(len(self.point_cloud))
+
+        plot_point_cloud(self.point_cloud, self.camera_rotations, self.camera_rotations)
+
+        self.visibility_matrix = point_visibility_map.T
+
+        self.world_to_1_map = world_to_1_map
+            # Do bundle adjustments
+
+    def do_bundle_adjustment(self):
+        # print("sizes")
+        point_cloud = np.array(self.point_cloud)
+        world_to_1_map = np.array(self.world_to_1_map)
+        
+        visibility_matrix = self.visibility_matrix.T
+        # print(self.visibility_matrix)
+        # print(point_cloud)
+        # print(world_to_1_map)
+
+        points_count, cameras_count = np.shape(visibility_matrix)
+        # point, camera, proj(x,y)
+        pprint(self.feature_points)
+        print("feature points shape")
+        print(np.shape(self.feature_points))
+
+        self.optim_R_set, self.optim_C_set, self.optim_world_coords = BundleAdjustment(visibility_matrix, point_cloud, self.feature_points, self.camera_rotations, self.camera_translations, self.K, len(self.target_pairs)+1)
+        
+
+if __name__ == "__main__":
+    make_output_dir()
+
+    files_path = os.path.normpath('P3Data')
+    main = Main(files_path)
+    # main.eliminate_outliers_using_homography()
+    main.estimate_fundamental_matrices()
+    main.estimate_essential_matrix()
+    main.extract_camera_pose()
+    main.triangulate_and_fix_camera_pose()
+    main.apply_pnp()
+    main.do_bundle_adjustment()
+>>>>>>> Stashed changes
