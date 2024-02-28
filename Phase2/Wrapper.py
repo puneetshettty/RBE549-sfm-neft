@@ -1,17 +1,22 @@
 import argparse
 import glob
-from tqdm import tqdm
-import random
-from torch.utils.tensorboard import SummaryWriter
-import imageio
-import torch
-import matplotlib.pyplot as plt
+import json
 import os
+import math
+import random
 
+import imageio.v3 as iio
+import matplotlib.pyplot as plt
+import torch
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
+
+from log_setup import logger
 from NeRFModel import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
+
 
 def loadDataset(data_path, mode):
     """
@@ -23,7 +28,31 @@ def loadDataset(data_path, mode):
         images: images
         pose: corresponding camera pose in world frame
     """
+    # check if file exists
+    transforms_file = os.path.join(data_path, f"transforms_{mode}.json")
+    if not os.path.exists(transforms_file):
+        logger.error("Dataset not found")
+        raise FileNotFoundError(f"Dataset {mode} not found at {transforms_file}")
 
+    json_data = json.load(open(transforms_file))
+
+    # TODO need to move these data blocks to GPU using torch .to()
+    camera_angle_x = json_data['camera_angle_x']
+
+    # TODO need to check if this is correct
+    focal = 0.5 / np.tan(0.5 * camera_angle_x)
+
+    frames = json_data['frames']
+    images = [iio.imread(os.path.join(data_path, frame['file_path']+'.png')) for frame in frames]
+    poses = np.array([np.array(frame['transform_matrix']) for frame in frames])
+
+    height, width = images[0].shape[:2]
+    # TODO need to check if this is correct
+    camera_matrix = np.array([[focal, 0, width/2], [0, focal, height/2], [0, 0, 1]])
+
+    return (width, height, camera_matrix), images, poses
+
+    
 def PixelToRay(camera_info, pose, pixelPosition, args):
     """
     Input:
@@ -34,6 +63,7 @@ def PixelToRay(camera_info, pose, pixelPosition, args):
     Outputs:
         ray origin and direction
     """
+    pass
 
 def generateBatch(images, poses, camera_info, args):
     """
@@ -45,6 +75,10 @@ def generateBatch(images, poses, camera_info, args):
     Outputs:
         A set of rays
     """
+    # TODO not sure if batching is to be done?
+    # the notebook does an iteration for just 1 image at a time
+    pass
+    
 
 def render(model, rays_origin, rays_direction, args):
     """
@@ -55,14 +89,18 @@ def render(model, rays_origin, rays_direction, args):
     Outputs:
         rgb values of input rays
     """
+    pass
 
 def loss(groundtruth, prediction):
+    pass
 
 
 def train(images, poses, camera_info, args):
+    pass
     
 
 def test(images, poses, camera_info, args):
+    pass
 
 
 def main(args):
@@ -73,6 +111,7 @@ def main(args):
     if args.mode == 'train':
         print("Start training")
         train(images, poses, camera_info, args)
+        images_val, poses_val, camera_info_val = loadDataset(args.data_path, 'val')
     elif args.mode == 'test':
         print("Start testing")
         args.load_checkpoint = True
@@ -80,7 +119,7 @@ def main(args):
 
 def configParser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path',default="./Phase2/Data/lego/",help="dataset path")
+    parser.add_argument('--data_path',default="./Phase2/Data/leg2o/",help="dataset path")
     parser.add_argument('--mode',default='train',help="train/test/val")
     parser.add_argument('--lrate',default=5e-4,help="training learning rate")
     parser.add_argument('--n_pos_freq',default=10,help="number of positional encoding frequencies for position")
@@ -98,4 +137,8 @@ def configParser():
 if __name__ == "__main__":
     parser = configParser()
     args = parser.parse_args()
+    logger.info("#"*30)
+    logger.info("####### PROGRAM START ########")
+    logger.info("#"*30)
+
     main(args)

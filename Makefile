@@ -1,25 +1,31 @@
 .ONESHELL:
+SHELL := /bin/bash
 
 phase1/wrapper: venv ## Run Phase 1 Wrapper
-	. venv/bin/activate
-	cd Phase1
-	python Wrapper.py --ImageSet Set1
+	@source venv/bin/activate
+	@cd Phase1
+	@python Wrapper.py --ImageSet Set1
 
-phase2/wrapper: ## Run Phase 2 Wrapper 
-	. venv/bin/activate
-	cd Phase2
-	python Wrapper.py
+phase2/train/lego: venv ## Run Phase 1 Wrapper
+	@source venv/bin/activate
+	@cd Phase2
+	@python Wrapper.py --data_path ./data/lego
+
+phase2/wrapper: venv ## Run Phase 1 Wrapper
+	@source venv/bin/activate
+	@cd Phase2
+	@python Wrapper.py 
 
 get-shell: venv ## Get a shell in the virtual environment
-	. venv/bin/activate
-	python
+	@source venv/bin/activate
+	@python
 
 venv: venv/touchfile ## Create a virtual environment
 
 venv/touchfile: requirements.txt
-	test -d venv || python3 -m venv venv
-	. venv/bin/activate; pip install -Ur requirements.txt
-	touch venv/touchfile
+	@test -d venv || python3 -m venv venv
+	@. venv/bin/activate; pip install -Ur requirements.txt
+	@touch venv/touchfile
 
 clean: ## Clean up the project
 	rm -rf venv
