@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
+import torchvision
 from tqdm import tqdm
 
 from log_setup import logger
@@ -168,6 +169,132 @@ def loss(groundtruth, prediction):
     return loss
 
 
+def load_latest_model():
+    list_of_files = glob.glob('./Phase2/example_checkpoint/*')
+    latest_file = max(list_of_files, key=os.path.getctime)
+    model = NeRFmodel()
+    model.load_state_dict(torch.load(latest_file))
+    return model
+
+def render_image(model, poses, camera_info, args, i):
+    model.eval()
+    with torch.no_grad():
+        pose = poses[i]
+        camera_inform = camera_info
+
+        # Get the ray origins and directions
+        ray_origins, ray_directions = PixelToRay(camera_inform[0], camera_inform[1], camera_inform[2][0,0], pose)
+
+        x = torch.arange(camera_inform[0], dtype=pose.dtype, device=pose.device)
+        y = torch.arange(camera_inform[1], dtype=pose.dtype, device=pose.device)
+        x, y = torch.meshgrid(x, y)
+        x = x.transpose(-1, -2)
+        y = y.transpose(-1, -2) 
+        coords = torch.stack([x, y], -1)
+        coords = coords.reshape(-1, 2)
+        ray_idx = np.random.choice(coords.shape[0], args.n_rays_batch, replace=False)
+        ray_origins = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
+        ray_directions = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
+
+        viewdirs = ray_directions/ ray_directions.norm(p=2, dim=-1).unsqueeze(-1)
+        viewdirs = viewdirs.view(-1, 3)
+
+        ray_origin = ray_origins.view(-1, 3)
+        ray_direction = ray_directions.view(-1, 3)
+
+        # near = 2.0 * torch.ones_like(ray_origin[..., :1])
+        # far = 6.0 * torch.ones_like(ray_origin[..., :1])
+
+        # Sample the points
+        points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
+
+        input_dirs = viewdirs.expand(points.shape)
+        input_dirs = input_dirs.reshape(-1, 3)
+        embedded_dirs = positional_encoding(input_dirs, num_encoding_functions=args.n_dirc_freq, include_input=True, log_sampling=True)
+
+        embed = torch.cat((points, embedded_dirs), -1)
+
+        # Generate the batch
+        batch = generateBatch(embed, args.n_rays_batch)
+
+        # Forward pass
+        prediction = [model(batch) for batch in batch]
+
+        radiance_field = torch.cat(prediction, dim=0)
+        radiance_field = radiance_field.reshape(list(points.shape[:-1]) + radiance_field.shape[-1])
+
+        rgb_map, depth_map, acc_map = render(radiance_field, ray_direction, samples)
+
+        return rgb_map
+
+
+
+def validate(model, images, poses, camera_info, args):
+    model.eval()
+    with torch.no_grad():
+         # Sample a random image
+        idx = random.randint(0, len(images)-1)
+        image = images[idx]
+        pose = poses[idx]
+        camera_inform = camera_info
+
+        # Get the ray origins and directions
+        ray_origins, ray_directions = PixelToRay(camera_inform[0], camera_inform[1], camera_inform[2][0,0], pose)
+
+        x = torch.arange(camera_inform[0], dtype=pose.dtype, device=pose.device)
+        y = torch.arange(camera_inform[1], dtype=pose.dtype, device=pose.device)
+        x, y = torch.meshgrid(x, y)
+        x = x.transpose(-1, -2)
+        y = y.transpose(-1, -2) 
+        coords = torch.stack([x, y], -1)
+        coords = coords.reshape(-1, 2)
+        ray_idx = np.random.choice(coords.shape[0], args.n_rays_batch, replace=False)
+        ray_origins = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
+        ray_directions = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
+
+        target_img = image[ray_idx[:,0], ray_idx[:,1], :]
+
+        viewdirs = ray_directions/ ray_directions.norm(p=2, dim=-1).unsqueeze(-1)
+        viewdirs = viewdirs.view(-1, 3)
+
+        ray_origin = ray_origins.view(-1, 3)
+        ray_direction = ray_directions.view(-1, 3)
+
+        # near = 2.0 * torch.ones_like(ray_origin[..., :1])
+        # far = 6.0 * torch.ones_like(ray_origin[..., :1])
+
+        # Sample the points
+        points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
+
+        input_dirs = viewdirs.expand(points.shape)
+        input_dirs = input_dirs.reshape(-1, 3)
+        embedded_dirs = positional_encoding(input_dirs, num_encoding_functions=args.n_dirc_freq, include_input=True, log_sampling=True)
+
+        embed = torch.cat((points, embedded_dirs), -1)
+
+        # Generate the batch
+        batch = generateBatch(embed, args.n_rays_batch)
+
+        # Forward pass
+        prediction = [model(batch) for batch in batch]
+
+        radiance_field = torch.cat(prediction, dim=0)
+        radiance_field = radiance_field.reshape(list(points.shape[:-1]) + radiance_field.shape[-1])
+
+        # Render the image
+        rgb_map, depth_map, acc_map = render(radiance_field, ray_direction, samples)
+
+        # Calculate the loss
+        loss = loss(rgb_map[..., :3], target_img[..., :3])
+
+        # Log the loss
+        # writer.add_scalar('Loss', loss, i)
+
+
+
+
+
+
 def train(images, poses, camera_info, args):
     """
     Input:
@@ -179,6 +306,7 @@ def train(images, poses, camera_info, args):
     # Initialize the model
     model = NeRFmodel()
     model.to(device)
+    model.train()
 
     # Initialize the optimizer
     optimizer = torch.optim.Adam(model.parameters(), args.lrate)
@@ -225,11 +353,11 @@ def train(images, poses, camera_info, args):
         ray_origin = ray_origins.view(-1, 3)
         ray_direction = ray_directions.view(-1, 3)
 
-        near = 2.0 * torch.ones_like(ray_origin[..., :1])
-        far = 6.0 * torch.ones_like(ray_origin[..., :1])
+        # near = 2.0 * torch.ones_like(ray_origin[..., :1])
+        # far = 6.0 * torch.ones_like(ray_origin[..., :1])
 
         # Sample the points
-        points, samples = SamplePoints(ray_origins, ray_directions, 2, 6, args.n_sample)
+        points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
 
         input_dirs = viewdirs.expand(points.shape)
         input_dirs = input_dirs.reshape(-1, 3)
@@ -238,7 +366,7 @@ def train(images, poses, camera_info, args):
         embed = torch.cat((points, embedded_dirs), -1)
 
         # Generate the batch
-        batch = generateBatch(points, args.n_rays_batch)
+        batch = generateBatch(embed, args.n_rays_batch)
 
         # Forward pass
         prediction = [model(batch) for batch in batch]
@@ -266,26 +394,47 @@ def train(images, poses, camera_info, args):
             torch.save({
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
+                'loss': loss,
             }, args.checkpoint_path)
 
     # Close the summary writer
     writer.close()
 
+    return model
+
     
 
 def test(images, poses, camera_info, args):
-    pass
+    model = load_latest_model()
+    model.eval()
+
+    images = []
+
+    for i in tqdm(enumerate(np.linspace(0.0, 360, 120, endpoint=False))):
+        rgb_map = render_image(model, poses, camera_info, args, i)
+        image_values = rgb_map[..., :3]
+        image_values = image_values.permute(2, 0, 1)
+
+        image = np.array(torchvision.transforms.ToPILImage()(image_values.detach().cpu()))
+        image = np.moveaxis(image, [-1], [0])
+
+        images.append(image)
+
+
+    iio.mimwrite("gif.mp4", images, fps=30, quality=7, macro_block_size=None)
 
 
 def main(args):
     # load data
     print("Loading data...")
     images, poses, camera_info = loadDataset(args.data_path, args.mode)
+    images_val, poses_val, camera_info_val = loadDataset(args.data_path, 'val')
+    images_test, poses_test, camera_info_test = loadDataset(args.data_path, 'test')
 
     if args.mode == 'train':
         print("Start training")
-        train(images, poses, camera_info, args)
-        images_val, poses_val, camera_info_val = loadDataset(args.data_path, 'val')
+        model = train(images, poses, camera_info, args)
+        # validate(model, images_val, poses_val, camera_info_val, args)
     elif args.mode == 'test':
         print("Start testing")
         args.load_checkpoint = True
