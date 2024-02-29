@@ -103,7 +103,7 @@ def SamplePoints(ray_origins, ray_directions, near, far, N_samples):
     samples = torch.linspace(near, far, N_samples)
     rays = ray_origins[..., None, :] + samples[..., None] * ray_directions[..., None, :]
     points = rays.reshape(-1, 3)
-    points = positional_encoding(points, num_encoding_functions=6, include_input=True, log_sampling=True)
+    
 
     return points, samples
 
@@ -207,12 +207,13 @@ def render_image(model, poses, camera_info, args, i):
 
         # Sample the points
         points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
+        embedded_pts = positional_encoding(points, num_encoding_functions=6, include_input=True, log_sampling=True)
 
         input_dirs = viewdirs.expand(points.shape)
         input_dirs = input_dirs.reshape(-1, 3)
         embedded_dirs = positional_encoding(input_dirs, num_encoding_functions=args.n_dirc_freq, include_input=True, log_sampling=True)
 
-        embed = torch.cat((points, embedded_dirs), -1)
+        embed = torch.cat((embedded_pts, embedded_dirs), -1)
 
         # Generate the batch
         batch = generateBatch(embed, args.n_rays_batch)
@@ -266,11 +267,13 @@ def validate(model, images, poses, camera_info, args):
         # Sample the points
         points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
 
+        embedded_pts = positional_encoding(points, num_encoding_functions=6, include_input=True, log_sampling=True)
+
         input_dirs = viewdirs.expand(points.shape)
         input_dirs = input_dirs.reshape(-1, 3)
         embedded_dirs = positional_encoding(input_dirs, num_encoding_functions=args.n_dirc_freq, include_input=True, log_sampling=True)
 
-        embed = torch.cat((points, embedded_dirs), -1)
+        embed = torch.cat((embedded_pts, embedded_dirs), -1)
 
         # Generate the batch
         batch = generateBatch(embed, args.n_rays_batch)
@@ -359,11 +362,13 @@ def train(images, poses, camera_info, args):
         # Sample the points
         points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
 
+        embedded_pts = positional_encoding(points, num_encoding_functions=6, include_input=True, log_sampling=True)
+
         input_dirs = viewdirs.expand(points.shape)
         input_dirs = input_dirs.reshape(-1, 3)
         embedded_dirs = positional_encoding(input_dirs, num_encoding_functions=args.n_dirc_freq, include_input=True, log_sampling=True)
 
-        embed = torch.cat((points, embedded_dirs), -1)
+        embed = torch.cat((embedded_pts, embedded_dirs), -1)
 
         # Generate the batch
         batch = generateBatch(embed, args.n_rays_batch)
