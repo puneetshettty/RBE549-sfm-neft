@@ -7,11 +7,13 @@ import random
 import imageio.v3 as iio
 import matplotlib.pyplot as plt
 import torch
+import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from log_setup import logger
 from NeRFModel import *
+import argparse
 
 model = NeRFmodel()
 positional_encoding = model.position_encoding
@@ -65,12 +67,12 @@ def PixelToRay(W, H, focal, pose):
     Outputs:
         ray origin and direction
     """
-    x = torch.linspace(0, H-1, H)
-    y = torch.linspace(0, W-1, W)
-    x, y = torch.meshgrid(x, y) 
+    x = torch.arange(W, dtype=pose.dtype, device=pose.device)
+    y = torch.arange(H, dtype=pose.dtype, device=pose.device)
+    x, y = torch.meshgrid(x, y)
+    x = x.transpose(-1, -2)
+    y = y.transpose(-1, -2) 
 
-    x = x.T
-    y = y.T
 
     x = (x - H * 0.5) / focal
     y = (y - W * 0.5) / focal
@@ -82,7 +84,7 @@ def PixelToRay(W, H, focal, pose):
 
     directions = ray_direction[..., None, :]
     ray_directions = torch.sum(directions * Rotation, -1)
-    ray_origins = torch.broadcast_to(Translation, ray_directions.shape)
+    ray_origins = Translation.expand(ray_directions.shape)
 
     return ray_origins, ray_directions
 
@@ -98,14 +100,12 @@ def SamplePoints(ray_origins, ray_directions, near, far, N_samples):
         sampled points
     """
     samples = torch.linspace(near, far, N_samples)
-    rays = ray_origins[..., None, :] + t[..., None] * ray_directions[..., None, :]
+    rays = ray_origins[..., None, :] + samples[..., None] * ray_directions[..., None, :]
     points = rays.reshape(-1, 3)
-    points = positional_encoding(points, num_encoding_functions=4, include_input=True, log_sampling=True)
-
+    points = positional_encoding(points, num_encoding_functions=6, include_input=True, log_sampling=True)
 
     return points, samples
 
-import os  # Import the "os" module to use its functions
 
 def generateBatch(raypoints, batch_size):
     """
@@ -134,7 +134,7 @@ def cumprod_exclusive(tensor) :
 def render(radiance_field, ray_directions, depth_values):
     """
     Input:
-        radiance_field: rgb map from model
+        radiance_field: rgb from model
         ray_directions: direction of input rays
         depth_values: number of samples
     Outputs:
@@ -169,12 +169,107 @@ def loss(groundtruth, prediction):
 
 
 def train(images, poses, camera_info, args):
-    writer = SummaryWriter(args.logs_path)
-    dataset = loadDataset(args.data_path, 'train')
-
+    """
+    Input:
+        images: images
+        poses: camera pose in world frame
+        camera_info: image width, height, camera matrix 
+        args: training arguments
+    """
+    # Initialize the model
     model = NeRFmodel()
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lrate)
+
+    # Initialize the optimizer
+    optimizer = torch.optim.Adam(model.parameters(), args.lrate)
+
+    # Initialize the summary writer
+    writer = SummaryWriter(args.logs_path)
+
+    # Load the checkpoint if required
+    if args.load_checkpoint:
+        checkpoint = torch.load(args.checkpoint_path)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+    # Initialize the loss
+    loss = 0
+
+    # Start the training loop
+    for i in range(args.max_iters):
+        # Sample a random image
+        idx = random.randint(0, len(images)-1)
+        image = images[idx]
+        pose = poses[idx]
+        camera_inform = camera_info
+
+        # Get the ray origins and directions
+        ray_origins, ray_directions = PixelToRay(camera_inform[0], camera_inform[1], camera_inform[2][0,0], pose)
+
+        x = torch.arange(camera_inform[0], dtype=pose.dtype, device=pose.device)
+        y = torch.arange(camera_inform[1], dtype=pose.dtype, device=pose.device)
+        x, y = torch.meshgrid(x, y)
+        x = x.transpose(-1, -2)
+        y = y.transpose(-1, -2) 
+        coords = torch.stack([x, y], -1)
+        coords = coords.reshape(-1, 2)
+        ray_idx = np.random.choice(coords.shape[0], args.n_rays_batch, replace=False)
+        ray_origins = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
+        ray_directions = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
+
+        target_img = image[ray_idx[:,0], ray_idx[:,1], :]
+
+        viewdirs = ray_directions/ ray_directions.norm(p=2, dim=-1).unsqueeze(-1)
+        viewdirs = viewdirs.view(-1, 3)
+
+        ray_origin = ray_origins.view(-1, 3)
+        ray_direction = ray_directions.view(-1, 3)
+
+        near = 2.0 * torch.ones_like(ray_origin[..., :1])
+        far = 6.0 * torch.ones_like(ray_origin[..., :1])
+
+        # Sample the points
+        points, samples = SamplePoints(ray_origins, ray_directions, 2, 6, args.n_sample)
+
+        input_dirs = viewdirs.expand(points.shape)
+        input_dirs = input_dirs.reshape(-1, 3)
+        embedded_dirs = positional_encoding(input_dirs, num_encoding_functions=args.n_dirc_freq, include_input=True, log_sampling=True)
+
+        embed = torch.cat((points, embedded_dirs), -1)
+
+        # Generate the batch
+        batch = generateBatch(points, args.n_rays_batch)
+
+        # Forward pass
+        prediction = [model(batch) for batch in batch]
+
+        radiance_field = torch.cat(prediction, dim=0)
+        radiance_field = radiance_field.reshape(list(points.shape[:-1]) + radiance_field.shape[-1])
+
+        # Render the image
+        rgb_map, depth_map, acc_map = render(radiance_field, ray_direction, samples)
+
+        # Calculate the loss
+        loss = loss(rgb_map[..., :3], target_img[..., :3])
+
+        # Backward pass
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+        optimizer.zero_grad()
+
+        # Log the loss
+        writer.add_scalar('Loss', loss, i)
+
+        # Save the checkpoint
+        if i % args.save_ckpt_iter == 0:
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+            }, args.checkpoint_path)
+
+    # Close the summary writer
+    writer.close()
 
     
 
@@ -203,7 +298,7 @@ def configParser():
     parser.add_argument('--lrate',default=5e-4,help="training learning rate")
     parser.add_argument('--n_pos_freq',default=6,help="number of positional encoding frequencies for position")
     parser.add_argument('--n_dirc_freq',default=4,help="number of positional encoding frequencies for viewing direction")
-    parser.add_argument('--n_rays_batch',default=32*32*4,help="number of rays per batch")
+    parser.add_argument('--n_rays_batch',default=32*32*8,help="number of rays per batch")
     parser.add_argument('--n_sample',default=64,help="number of sample per ray")
     parser.add_argument('--max_iters',default=10000,help="number of max iterations for training")
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
