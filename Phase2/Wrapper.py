@@ -17,10 +17,51 @@ from NeRFModel import *
 import argparse
 
 model = NeRFmodel()
-positional_encoding = model.position_encoding
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 np.random.seed(0)
+
+def positional_encoding(tensor, num_encoding_functions=6, include_input=True, log_sampling=True) -> torch.Tensor:
+    """Apply positional encoding to the input.
+
+    Args:
+        tensor (torch.Tensor): Input tensor to be positionally encoded.
+        encoding_size (optional, int): Number of encoding functions used to compute
+            a positional encoding (default: 6).
+        include_input (optional, bool): Whether or not to include the input in the
+            positional encoding (default: True).
+
+    Returns:
+    (torch.Tensor): Positional encoding of the input tensor.
+    """
+    encoding = [tensor] if include_input else []
+    frequency_bands = None
+    if log_sampling:
+        frequency_bands = 2.0 ** torch.linspace(
+            0.0,
+            num_encoding_functions - 1,
+            num_encoding_functions,
+            dtype=tensor.dtype,
+            device=tensor.device,
+        )
+    else:
+        frequency_bands = torch.linspace(
+            2.0 ** 0.0,
+            2.0 ** (num_encoding_functions - 1),
+            num_encoding_functions,
+            dtype=tensor.dtype,
+            device=tensor.device,
+        )
+
+    for freq in frequency_bands:
+        for func in [torch.sin, torch.cos]:
+            encoding.append(func(tensor * freq))
+
+    # Special case, for no positional encoding
+    if len(encoding) == 1:
+        return encoding[0]
+    else:
+        return torch.cat(encoding, dim=-1)
 
 
 def loadDataset(data_path, mode):
@@ -68,8 +109,8 @@ def PixelToRay(W, H, focal, pose):
     Outputs:
         ray origin and direction
     """
-    x = torch.arange(W, dtype=pose.dtype, device=pose.device)
-    y = torch.arange(H, dtype=pose.dtype, device=pose.device)
+    x = torch.arange(W).to(device)
+    y = torch.arange(H).to(device)
     x, y = torch.meshgrid(x, y)
     x = x.transpose(-1, -2)
     y = y.transpose(-1, -2) 
@@ -116,11 +157,11 @@ def generateBatch(raypoints, batch_size):
     Outputs:
         batched points
     """
-    inputs = []  # Define the "inputs" variable as an empty list
+    batches = []  # Define the "inputs" variable as an empty list
     for i in range(0, len(raypoints), batch_size):
-        inputs.extend(raypoints[i: i + batch_size])  # Append the batched points to the "inputs" list
+        batches.extend(raypoints[i: i + batch_size])  # Append the batched points to the "inputs" list
 
-    return inputs
+    return batches
      
 
 # To calculate the cumulative product used to calculate alpha
@@ -143,8 +184,6 @@ def render(radiance_field, ray_directions, depth_values):
         depth_map: depth map
         acc_map: accumulated map
     """
-
-
     sigma_a = F.relu(radiance_field[...,3])       #volume density
     # print("sigma", sigma_a.shape)
     rgb = torch.sigmoid(radiance_field[...,:3])    #color value at nth depth value
@@ -162,25 +201,28 @@ def render(radiance_field, ray_directions, depth_values):
     return rgb_map, depth_map, acc_map
 
 
-    
-
 def loss(groundtruth, prediction):
     loss = torch.mean((groundtruth - prediction)**2)
     return loss
 
 
-def load_latest_model():
-    list_of_files = glob.glob('./Phase2/example_checkpoint/*')
-    latest_file = max(list_of_files, key=os.path.getctime)
-    model = NeRFmodel()
-    model.load_state_dict(torch.load(latest_file))
-    return model
+def load_latest_model(chk_path, model, optimizer):
+    list_of_files = glob.glob(os.path.join(chk_path, '*'))
+    if len(list_of_files) > 0:
+        latest_file = max(list_of_files, key=os.path.getctime)
+        checkpoint = torch.load(latest_file)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
 
 def render_image(model, poses, camera_info, args, i):
     model.eval()
     with torch.no_grad():
         pose = poses[i]
         camera_inform = camera_info
+        
+        print('camera info')
+        print(camera_info)
 
         # Get the ray origins and directions
         ray_origins, ray_directions = PixelToRay(camera_inform[0], camera_inform[1], camera_inform[2][0,0], pose)
@@ -226,76 +268,16 @@ def render_image(model, poses, camera_info, args, i):
 
         rgb_map, depth_map, acc_map = render(radiance_field, ray_direction, samples)
 
-        return rgb_map
-
+    return rgb_map, ray_idx
 
 
 def validate(model, images, poses, camera_info, args):
-    model.eval()
-    with torch.no_grad():
-         # Sample a random image
-        idx = random.randint(0, len(images)-1)
-        image = images[idx]
-        pose = poses[idx]
-        camera_inform = camera_info
-
-        # Get the ray origins and directions
-        ray_origins, ray_directions = PixelToRay(camera_inform[0], camera_inform[1], camera_inform[2][0,0], pose)
-
-        x = torch.arange(camera_inform[0], dtype=pose.dtype, device=pose.device)
-        y = torch.arange(camera_inform[1], dtype=pose.dtype, device=pose.device)
-        x, y = torch.meshgrid(x, y)
-        x = x.transpose(-1, -2)
-        y = y.transpose(-1, -2) 
-        coords = torch.stack([x, y], -1)
-        coords = coords.reshape(-1, 2)
-        ray_idx = np.random.choice(coords.shape[0], args.n_rays_batch, replace=False)
-        ray_origins = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
-        ray_directions = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
-
-        target_img = image[ray_idx[:,0], ray_idx[:,1], :]
-
-        viewdirs = ray_directions/ ray_directions.norm(p=2, dim=-1).unsqueeze(-1)
-        viewdirs = viewdirs.view(-1, 3)
-
-        ray_origin = ray_origins.view(-1, 3)
-        ray_direction = ray_directions.view(-1, 3)
-
-        # near = 2.0 * torch.ones_like(ray_origin[..., :1])
-        # far = 6.0 * torch.ones_like(ray_origin[..., :1])
-
-        # Sample the points
-        points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
-
-        embedded_pts = positional_encoding(points, num_encoding_functions=6, include_input=True, log_sampling=True)
-
-        input_dirs = viewdirs.expand(points.shape)
-        input_dirs = input_dirs.reshape(-1, 3)
-        embedded_dirs = positional_encoding(input_dirs, num_encoding_functions=args.n_dirc_freq, include_input=True, log_sampling=True)
-
-        embed = torch.cat((embedded_pts, embedded_dirs), -1)
-
-        # Generate the batch
-        batch = generateBatch(embed, args.n_rays_batch)
-
-        # Forward pass
-        prediction = [model(batch) for batch in batch]
-
-        radiance_field = torch.cat(prediction, dim=0)
-        radiance_field = radiance_field.reshape(list(points.shape[:-1]) + radiance_field.shape[-1])
-
-        # Render the image
-        rgb_map, depth_map, acc_map = render(radiance_field, ray_direction, samples)
-
-        # Calculate the loss
-        loss = loss(rgb_map[..., :3], target_img[..., :3])
-
-        # Log the loss
-        # writer.add_scalar('Loss', loss, i)
-
-
-
-
+    idx = random.randint(0, len(images)-1)
+    rgb_map, ray_idx = render_image(model, poses, camera_info, args, idx)
+    # Calculate the loss
+    image = images[idx]
+    target_img = image[ray_idx[:,0], ray_idx[:,1], :]
+    return loss(rgb_map[..., :3], target_img[..., :3])
 
 
 def train(images, poses, camera_info, args):
@@ -319,9 +301,7 @@ def train(images, poses, camera_info, args):
 
     # Load the checkpoint if required
     if args.load_checkpoint:
-        checkpoint = torch.load(args.checkpoint_path)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        load_latest_model(args.checkpoint_path, model, optimizer)
 
     # Initialize the loss
     loss = 0
@@ -333,6 +313,9 @@ def train(images, poses, camera_info, args):
         image = images[idx]
         pose = poses[idx]
         camera_inform = camera_info
+        
+        print('camera info')
+        print(camera_inform[0])
 
         # Get the ray origins and directions
         ray_origins, ray_directions = PixelToRay(camera_inform[0], camera_inform[1], camera_inform[2][0,0], pose)
@@ -371,10 +354,10 @@ def train(images, poses, camera_info, args):
         embed = torch.cat((embedded_pts, embedded_dirs), -1)
 
         # Generate the batch
-        batch = generateBatch(embed, args.n_rays_batch)
+        batches = generateBatch(embed, args.n_rays_batch)
 
         # Forward pass
-        prediction = [model(batch) for batch in batch]
+        prediction = [model(batch) for batch in batches]
 
         radiance_field = torch.cat(prediction, dim=0)
         radiance_field = radiance_field.reshape(list(points.shape[:-1]) + radiance_field.shape[-1])
@@ -386,7 +369,6 @@ def train(images, poses, camera_info, args):
         loss = loss(rgb_map[..., :3], target_img[..., :3])
 
         # Backward pass
-        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
@@ -401,6 +383,10 @@ def train(images, poses, camera_info, args):
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss,
             }, args.checkpoint_path)
+        
+        # Validate the model
+        loss = validate(model, images, poses, camera_info, args)
+        writer.add_scalar('val_Loss', loss, i)
 
     # Close the summary writer
     writer.close()
@@ -408,7 +394,6 @@ def train(images, poses, camera_info, args):
     return model
 
     
-
 def test(images, poses, camera_info, args):
     model = load_latest_model()
     model.eval()
@@ -416,7 +401,7 @@ def test(images, poses, camera_info, args):
     images = []
 
     for i in tqdm(enumerate(np.linspace(0.0, 360, 120, endpoint=False))):
-        rgb_map = render_image(model, poses, camera_info, args, i)
+        rgb_map, _ = render_image(model, poses, camera_info, args, i)
         image_values = rgb_map[..., :3]
         image_values = image_values.permute(2, 0, 1)
 
@@ -432,7 +417,7 @@ def test(images, poses, camera_info, args):
 def main(args):
     # load data
     print("Loading data...")
-    images, poses, camera_info = loadDataset(args.data_path, args.mode)
+    camera_info, images, poses = loadDataset(args.data_path, args.mode)
     images_val, poses_val, camera_info_val = loadDataset(args.data_path, 'val')
     images_test, poses_test, camera_info_test = loadDataset(args.data_path, 'test')
 
@@ -447,7 +432,7 @@ def main(args):
 
 def configParser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path',default="./Phase2/Data/leg2o/",help="dataset path")
+    parser.add_argument('--data_path',default="./Phase2/data/lego/",help="dataset path")
     parser.add_argument('--mode',default='train',help="train/test/val")
     parser.add_argument('--lrate',default=5e-4,help="training learning rate")
     parser.add_argument('--n_pos_freq',default=6,help="number of positional encoding frequencies for position")
