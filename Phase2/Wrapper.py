@@ -123,10 +123,13 @@ def PixelToRay(W, H, focal, pose):
 
     Rotation = pose[:3, :3]
     Translation = pose[:3, -1]
+    # Rotation = torch.tensor(Rotation_orig, device=device)
+    # Translation = torch.tensor(Translation_orig, device=device)
 
     directions = ray_direction[..., None, :]
     ray_directions = torch.sum(directions * Rotation, -1)
     ray_origins = Translation.expand(ray_directions.shape)
+    # ray_origins = torch.broadcast_to(Translation, ray_directions.shape)
 
     return ray_origins, ray_directions
 
@@ -141,7 +144,10 @@ def SamplePoints(ray_origins, ray_directions, near, far, N_samples):
     Outputs:
         sampled points
     """
+    num_rays = ray_origins.shape[0]
     samples = torch.linspace(near, far, N_samples)
+    # z_vals = 1.0 / (1.0 / near * (1.0 - samples) + 1.0 / far * samples)
+    # z_vals = z_vals.expand([num_rays, N_samples])
     rays = ray_origins[..., None, :] + samples[..., None] * ray_directions[..., None, :]
     points = rays.reshape(-1, 3)
     
@@ -221,8 +227,6 @@ def render_image(model, poses, camera_info, args, i):
         pose = poses[i]
         camera_inform = camera_info
         
-        print('camera info')
-        print(camera_info)
 
         # Get the ray origins and directions
         ray_origins, ray_directions = PixelToRay(camera_inform[0], camera_inform[1], camera_inform[2][0,0], pose)
@@ -235,8 +239,9 @@ def render_image(model, poses, camera_info, args, i):
         coords = torch.stack([x, y], -1)
         coords = coords.reshape(-1, 2)
         ray_idx = np.random.choice(coords.shape[0], args.n_rays_batch, replace=False)
-        ray_origins = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
-        ray_directions = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
+        ray_idx = coords[ray_idx]
+        ray_origin = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
+        ray_direction = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
 
         viewdirs = ray_directions/ ray_directions.norm(p=2, dim=-1).unsqueeze(-1)
         viewdirs = viewdirs.view(-1, 3)
@@ -311,25 +316,24 @@ def train(images, poses, camera_info, args):
         # Sample a random image
         idx = random.randint(0, len(images)-1)
         image = images[idx]
-        pose = poses[idx]
+        pose = torch.tensor(poses[idx], device=device)
         camera_inform = camera_info
-        
-        print('camera info')
-        print(camera_inform[0])
+    
 
         # Get the ray origins and directions
         ray_origins, ray_directions = PixelToRay(camera_inform[0], camera_inform[1], camera_inform[2][0,0], pose)
 
-        x = torch.arange(camera_inform[0], dtype=pose.dtype, device=pose.device)
-        y = torch.arange(camera_inform[1], dtype=pose.dtype, device=pose.device)
+        x = torch.arange(camera_inform[0])
+        y = torch.arange(camera_inform[1])
         x, y = torch.meshgrid(x, y)
         x = x.transpose(-1, -2)
         y = y.transpose(-1, -2) 
-        coords = torch.stack([x, y], -1)
-        coords = coords.reshape(-1, 2)
-        ray_idx = np.random.choice(coords.shape[0], args.n_rays_batch, replace=False)
-        ray_origins = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
-        ray_directions = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
+        coords = torch.stack((x, y), dim=-1)
+        coords = coords.reshape((-1, 2))
+        ray_idx = np.random.choice(coords.shape[0], size = args.n_sample, replace=False)
+        ray_idx = coords[ray_idx]
+        ray_origin = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
+        ray_direction = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
 
         target_img = image[ray_idx[:,0], ray_idx[:,1], :]
 
@@ -345,6 +349,7 @@ def train(images, poses, camera_info, args):
         # Sample the points
         points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
 
+
         embedded_pts = positional_encoding(points, num_encoding_functions=6, include_input=True, log_sampling=True)
 
         input_dirs = viewdirs.expand(points.shape)
@@ -354,7 +359,10 @@ def train(images, poses, camera_info, args):
         embed = torch.cat((embedded_pts, embedded_dirs), -1)
 
         # Generate the batch
+        print("Batch being generated")
         batches = generateBatch(embed, args.n_rays_batch)
+
+
 
         # Forward pass
         prediction = [model(batch) for batch in batches]
@@ -418,12 +426,12 @@ def main(args):
     # load data
     print("Loading data...")
     camera_info, images, poses = loadDataset(args.data_path, args.mode)
-    images_val, poses_val, camera_info_val = loadDataset(args.data_path, 'val')
-    images_test, poses_test, camera_info_test = loadDataset(args.data_path, 'test')
+    # images_val, poses_val, camera_info_val = loadDataset(args.data_path, 'val')
+    # images_test, poses_test, camera_info_test = loadDataset(args.data_path, 'test')
 
     if args.mode == 'train':
         print("Start training")
-        model = train(images, poses, camera_info, args)
+        train(images, poses, camera_info, args)
         # validate(model, images_val, poses_val, camera_info_val, args)
     elif args.mode == 'test':
         print("Start testing")
@@ -432,7 +440,7 @@ def main(args):
 
 def configParser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path',default="./Phase2/data/lego/",help="dataset path")
+    parser.add_argument('--data_path',default=".\data\lego",help="dataset path")
     parser.add_argument('--mode',default='train',help="train/test/val")
     parser.add_argument('--lrate',default=5e-4,help="training learning rate")
     parser.add_argument('--n_pos_freq',default=6,help="number of positional encoding frequencies for position")
