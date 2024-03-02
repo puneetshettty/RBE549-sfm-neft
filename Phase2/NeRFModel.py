@@ -35,7 +35,11 @@ class NeRFmodel(nn.Module):
         self.relu = torch.nn.functional.relu
 
     def forward(self, x):
+        #change type of x to float
+        x = x.float()
         xyz, dirs = x[..., : self.dim_xyz], x[..., self.dim_xyz :]
+        x = xyz
+        # print(xyz.shape)
         for i in range(self.depth):
             if i == 4:
                 x = self.layers_xyz[i](torch.cat((xyz, x), -1))

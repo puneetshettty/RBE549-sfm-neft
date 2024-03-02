@@ -16,9 +16,10 @@ from log_setup import logger
 from NeRFModel import *
 import argparse
 
-model = NeRFmodel()
+# model = NeRFmodel()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print("Device: ", device)
 np.random.seed(0)
 
 def positional_encoding(tensor, num_encoding_functions=6, include_input=True, log_sampling=True) -> torch.Tensor:
@@ -145,11 +146,12 @@ def SamplePoints(ray_origins, ray_directions, near, far, N_samples):
         sampled points
     """
     num_rays = ray_origins.shape[0]
-    samples = torch.linspace(near, far, N_samples)
+    samples = torch.linspace(near, far, N_samples, device=device)
     # z_vals = 1.0 / (1.0 / near * (1.0 - samples) + 1.0 / far * samples)
     # z_vals = z_vals.expand([num_rays, N_samples])
     rays = ray_origins[..., None, :] + samples[..., None] * ray_directions[..., None, :]
-    points = rays.reshape(-1, 3)
+    # print("Rays shape: ", rays.shape)
+    points = rays.to(device)
     
 
     return points, samples
@@ -207,7 +209,7 @@ def render(radiance_field, ray_directions, depth_values):
     return rgb_map, depth_map, acc_map
 
 
-def loss(groundtruth, prediction):
+def loss_function(groundtruth, prediction):
     loss = torch.mean((groundtruth - prediction)**2)
     return loss
 
@@ -224,65 +226,81 @@ def load_latest_model(chk_path, model, optimizer):
 def render_image(model, poses, camera_info, args, i):
     model.eval()
     with torch.no_grad():
-        pose = poses[i]
+        pose = torch.tensor(poses[i], device=device)
         camera_inform = camera_info
         
 
         # Get the ray origins and directions
         ray_origins, ray_directions = PixelToRay(camera_inform[0], camera_inform[1], camera_inform[2][0,0], pose)
+        ray_origins = ray_origins.to(device)
+        ray_directions = ray_directions.to(device)
 
-        x = torch.arange(camera_inform[0], dtype=pose.dtype, device=pose.device)
-        y = torch.arange(camera_inform[1], dtype=pose.dtype, device=pose.device)
+        x = torch.arange(camera_inform[0], device=pose.device)
+        y = torch.arange(camera_inform[1], device=pose.device)
         x, y = torch.meshgrid(x, y)
         x = x.transpose(-1, -2)
         y = y.transpose(-1, -2) 
-        coords = torch.stack([x, y], -1)
-        coords = coords.reshape(-1, 2)
-        ray_idx = np.random.choice(coords.shape[0], args.n_rays_batch, replace=False)
+        coords = torch.stack((x, y), dim=-1)
+        coords = coords.reshape((-1, 2))
+        ray_idx = np.random.choice(coords.shape[0], size = args.n_sample, replace=False)
         ray_idx = coords[ray_idx]
         ray_origin = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
         ray_direction = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
 
-        viewdirs = ray_directions/ ray_directions.norm(p=2, dim=-1).unsqueeze(-1)
+        viewdirs = ray_direction/ ray_direction.norm(p=2, dim=-1).unsqueeze(-1)
         viewdirs = viewdirs.view(-1, 3)
 
-        ray_origin = ray_origins.view(-1, 3)
-        ray_direction = ray_directions.view(-1, 3)
+        ray_origin = ray_origin.view(-1, 3)
+        ray_direction = ray_direction.view(-1, 3)
 
         # near = 2.0 * torch.ones_like(ray_origin[..., :1])
         # far = 6.0 * torch.ones_like(ray_origin[..., :1])
 
         # Sample the points
         points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
-        embedded_pts = positional_encoding(points, num_encoding_functions=6, include_input=True, log_sampling=True)
+        # print(f'Points shape: {points.shape}, Viewdirs shape: {viewdirs.shape}')
+
+
+        
 
         input_dirs = viewdirs.expand(points.shape)
         input_dirs = input_dirs.reshape(-1, 3)
+        points_flat = points.reshape(-1, 3)
+        embedded_pts = positional_encoding(points_flat, num_encoding_functions=6, include_input=True, log_sampling=True)
         embedded_dirs = positional_encoding(input_dirs, num_encoding_functions=args.n_dirc_freq, include_input=True, log_sampling=True)
+        # print(f'Embedded points shape: {embedded_pts.shape}, Embedded dirs shape: {embedded_dirs.shape}')
 
         embed = torch.cat((embedded_pts, embedded_dirs), -1)
+        # print(f'Embed shape: {embed.shape}')
 
         # Generate the batch
-        batch = generateBatch(embed, args.n_rays_batch)
+        print("Batch being generated")
+        batches = generateBatch(embed, args.n_rays_batch)
+        print("Batch generated")
+        # print(f'number of batches: {len(batches)}')
+
+
+
 
         # Forward pass
-        prediction = [model(batch) for batch in batch]
+        prediction = [model(batch) for batch in batches]
+        # print(f'shape of prediction: {prediction[0].shape}')
 
-        radiance_field = torch.cat(prediction, dim=0)
-        radiance_field = radiance_field.reshape(list(points.shape[:-1]) + radiance_field.shape[-1])
+        radiance_field = torch.stack(prediction, dim=0)
+        # print(f'Radiance field shape: {radiance_field.shape}')
+        radiance_field = radiance_field.reshape(list(points.shape[:-1]) + [radiance_field.shape[-1]])
 
+        # Render the image
         rgb_map, depth_map, acc_map = render(radiance_field, ray_direction, samples)
 
     return rgb_map, ray_idx
 
 
-def validate(model, images, poses, camera_info, args):
-    idx = random.randint(0, len(images)-1)
+def validate(model, image, poses, camera_info, args, idx):
     rgb_map, ray_idx = render_image(model, poses, camera_info, args, idx)
     # Calculate the loss
-    image = images[idx]
     target_img = image[ray_idx[:,0], ray_idx[:,1], :]
-    return loss(rgb_map[..., :3], target_img[..., :3])
+    return loss_function(rgb_map[..., :3], target_img[..., :3])
 
 
 def train(images, poses, camera_info, args):
@@ -315,16 +333,18 @@ def train(images, poses, camera_info, args):
     for i in range(args.max_iters):
         # Sample a random image
         idx = random.randint(0, len(images)-1)
-        image = images[idx]
+        image = torch.tensor(images[idx], device=device)
         pose = torch.tensor(poses[idx], device=device)
         camera_inform = camera_info
     
 
         # Get the ray origins and directions
         ray_origins, ray_directions = PixelToRay(camera_inform[0], camera_inform[1], camera_inform[2][0,0], pose)
+        ray_origins = ray_origins.to(device)
+        ray_directions = ray_directions.to(device)
 
-        x = torch.arange(camera_inform[0])
-        y = torch.arange(camera_inform[1])
+        x = torch.arange(camera_inform[0], device=pose.device)
+        y = torch.arange(camera_inform[1], device=pose.device)
         x, y = torch.meshgrid(x, y)
         x = x.transpose(-1, -2)
         y = y.transpose(-1, -2) 
@@ -337,44 +357,54 @@ def train(images, poses, camera_info, args):
 
         target_img = image[ray_idx[:,0], ray_idx[:,1], :]
 
-        viewdirs = ray_directions/ ray_directions.norm(p=2, dim=-1).unsqueeze(-1)
+        viewdirs = ray_direction/ ray_direction.norm(p=2, dim=-1).unsqueeze(-1)
         viewdirs = viewdirs.view(-1, 3)
 
-        ray_origin = ray_origins.view(-1, 3)
-        ray_direction = ray_directions.view(-1, 3)
+        ray_origin = ray_origin.view(-1, 3)
+        ray_direction = ray_direction.view(-1, 3)
 
         # near = 2.0 * torch.ones_like(ray_origin[..., :1])
         # far = 6.0 * torch.ones_like(ray_origin[..., :1])
 
         # Sample the points
         points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
+        # print(f'Points shape: {points.shape}, Viewdirs shape: {viewdirs.shape}')
 
 
-        embedded_pts = positional_encoding(points, num_encoding_functions=6, include_input=True, log_sampling=True)
+        
 
         input_dirs = viewdirs.expand(points.shape)
         input_dirs = input_dirs.reshape(-1, 3)
+        points_flat = points.reshape(-1, 3)
+        embedded_pts = positional_encoding(points_flat, num_encoding_functions=6, include_input=True, log_sampling=True)
         embedded_dirs = positional_encoding(input_dirs, num_encoding_functions=args.n_dirc_freq, include_input=True, log_sampling=True)
+        # print(f'Embedded points shape: {embedded_pts.shape}, Embedded dirs shape: {embedded_dirs.shape}')
 
         embed = torch.cat((embedded_pts, embedded_dirs), -1)
+        # print(f'Embed shape: {embed.shape}')
 
         # Generate the batch
         print("Batch being generated")
         batches = generateBatch(embed, args.n_rays_batch)
+        print("Batch generated")
+        # print(f'number of batches: {len(batches)}')
+
 
 
 
         # Forward pass
         prediction = [model(batch) for batch in batches]
+        # print(f'shape of prediction: {prediction[0].shape}')
 
-        radiance_field = torch.cat(prediction, dim=0)
-        radiance_field = radiance_field.reshape(list(points.shape[:-1]) + radiance_field.shape[-1])
+        radiance_field = torch.stack(prediction, dim=0)
+        # print(f'Radiance field shape: {radiance_field.shape}')
+        radiance_field = radiance_field.reshape(list(points.shape[:-1]) + [radiance_field.shape[-1]])
 
         # Render the image
         rgb_map, depth_map, acc_map = render(radiance_field, ray_direction, samples)
 
         # Calculate the loss
-        loss = loss(rgb_map[..., :3], target_img[..., :3])
+        loss = loss_function(rgb_map[..., :3], target_img[..., :3]).to(device)
 
         # Backward pass
         loss.backward()
@@ -386,14 +416,15 @@ def train(images, poses, camera_info, args):
 
         # Save the checkpoint
         if i % args.save_ckpt_iter == 0:
+            checkpoint_save_name =  args.checkpoint_path + os.sep + 'model_' + str(i) + '.ckpt'
             torch.save({
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'loss': loss,
-            }, args.checkpoint_path)
+            }, checkpoint_save_name)
         
         # Validate the model
-        loss = validate(model, images, poses, camera_info, args)
+        loss = validate(model, image, poses, camera_info, args, idx)
         writer.add_scalar('val_Loss', loss, i)
 
     # Close the summary writer
@@ -445,14 +476,22 @@ def configParser():
     parser.add_argument('--lrate',default=5e-4,help="training learning rate")
     parser.add_argument('--n_pos_freq',default=6,help="number of positional encoding frequencies for position")
     parser.add_argument('--n_dirc_freq',default=4,help="number of positional encoding frequencies for viewing direction")
-    parser.add_argument('--n_rays_batch',default=32*32*8,help="number of rays per batch")
-    parser.add_argument('--n_sample',default=64,help="number of sample per ray")
+    parser.add_argument('--n_rays_batch',default=1024*8,help="number of rays per batch")
+    parser.add_argument('--n_sample',default=8,help="number of sample per ray")
     parser.add_argument('--max_iters',default=10000,help="number of max iterations for training")
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
-    parser.add_argument('--checkpoint_path',default="./Phase2/example_checkpoint/",help="checkpoints path")
+    parser.add_argument('--checkpoint_path',default="./checkpoints/",help="checkpoints path")
     parser.add_argument('--load_checkpoint',default=True,help="whether to load checkpoint or not")
     parser.add_argument('--save_ckpt_iter',default=1000,help="num of iteration to save checkpoint")
     parser.add_argument('--images_path', default="./image/",help="folder to store images")
+
+    args = parser.parse_args()  # Parse the arguments
+    
+    if not os.path.exists(args.logs_path):
+        os.makedirs(args.logs_path)
+
+    if not os.path.exists(args.checkpoint_path):
+        os.makedirs(args.checkpoint_path)
     return parser
 
 if __name__ == "__main__":
