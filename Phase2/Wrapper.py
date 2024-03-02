@@ -242,7 +242,7 @@ def render_image(model, poses, camera_info, args, i):
         y = y.transpose(-1, -2) 
         coords = torch.stack((x, y), dim=-1)
         coords = coords.reshape((-1, 2))
-        ray_idx = np.random.choice(coords.shape[0], size = args.n_sample, replace=False)
+        ray_idx = np.random.choice(coords.shape[0], size = args.n_rays, replace=False)
         ray_idx = coords[ray_idx]
         ray_origin = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
         ray_direction = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
@@ -263,7 +263,7 @@ def render_image(model, poses, camera_info, args, i):
 
         
 
-        input_dirs = viewdirs.expand(points.shape)
+        input_dirs = viewdirs.unsqueeze(1).expand(points.shape)
         input_dirs = input_dirs.reshape(-1, 3)
         points_flat = points.reshape(-1, 3)
         embedded_pts = positional_encoding(points_flat, num_encoding_functions=6, include_input=True, log_sampling=True)
@@ -274,9 +274,9 @@ def render_image(model, poses, camera_info, args, i):
         # print(f'Embed shape: {embed.shape}')
 
         # Generate the batch
-        print("Batch being generated")
-        batches = generateBatch(embed, args.n_rays_batch)
-        print("Batch generated")
+        # print("Batch being generated")
+        batches = generateBatch(embed, args.batchsize)
+        # print("Batch generated")
         # print(f'number of batches: {len(batches)}')
 
 
@@ -350,7 +350,7 @@ def train(images, poses, camera_info, args):
         y = y.transpose(-1, -2) 
         coords = torch.stack((x, y), dim=-1)
         coords = coords.reshape((-1, 2))
-        ray_idx = np.random.choice(coords.shape[0], size = args.n_sample, replace=False)
+        ray_idx = np.random.choice(coords.shape[0], size = args.n_rays, replace=False)
         ray_idx = coords[ray_idx]
         ray_origin = ray_origins[ray_idx[:,0], ray_idx[:,1], :]
         ray_direction = ray_directions[ray_idx[:,0], ray_idx[:,1], :]
@@ -373,7 +373,8 @@ def train(images, poses, camera_info, args):
 
         
 
-        input_dirs = viewdirs.expand(points.shape)
+        input_dirs = viewdirs.unsqueeze(1).expand(points.shape)
+        # print(f'Input dirs shape: {input_dirs.shape}')
         input_dirs = input_dirs.reshape(-1, 3)
         points_flat = points.reshape(-1, 3)
         embedded_pts = positional_encoding(points_flat, num_encoding_functions=6, include_input=True, log_sampling=True)
@@ -384,9 +385,9 @@ def train(images, poses, camera_info, args):
         # print(f'Embed shape: {embed.shape}')
 
         # Generate the batch
-        print("Batch being generated")
-        batches = generateBatch(embed, args.n_rays_batch)
-        print("Batch generated")
+        # print("Batch being generated")
+        batches = generateBatch(embed, args.batchsize)
+        # print("Batch generated")
         # print(f'number of batches: {len(batches)}')
 
 
@@ -426,6 +427,8 @@ def train(images, poses, camera_info, args):
         # Validate the model
         loss = validate(model, image, poses, camera_info, args, idx)
         writer.add_scalar('val_Loss', loss, i)
+
+        print(f'Iteration: {i}, Loss: {loss}')
 
     # Close the summary writer
     writer.close()
@@ -476,8 +479,9 @@ def configParser():
     parser.add_argument('--lrate',default=5e-4,help="training learning rate")
     parser.add_argument('--n_pos_freq',default=6,help="number of positional encoding frequencies for position")
     parser.add_argument('--n_dirc_freq',default=4,help="number of positional encoding frequencies for viewing direction")
-    parser.add_argument('--n_rays_batch',default=1024*8,help="number of rays per batch")
+    parser.add_argument('--batchsize',default=1024*4,help="batchsize")
     parser.add_argument('--n_sample',default=8,help="number of sample per ray")
+    parser.add_argument('--n_rays',default=64,help="number of rays")
     parser.add_argument('--max_iters',default=10000,help="number of max iterations for training")
     parser.add_argument('--logs_path',default="./logs/",help="logs path")
     parser.add_argument('--checkpoint_path',default="./checkpoints/",help="checkpoints path")
