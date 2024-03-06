@@ -5,6 +5,8 @@ import math
 import random
 
 import imageio.v3 as iio
+
+import imageio
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
@@ -193,18 +195,16 @@ def render(radiance_field, ray_directions, depth_values):
         acc_map: accumulated map
     """
     sigma_a = F.relu(radiance_field[...,3])       #volume density
-    # print("sigma", sigma_a.shape)
     rgb = torch.sigmoid(radiance_field[...,:3])    #color value at nth depth value
-    # print("rgb", rgb.shape)
     one_e_10 = torch.tensor([1e10], dtype = ray_directions.dtype, device = ray_directions.device)
     # print("one_e_10", one_e_10.shape)
     dists = torch.cat((depth_values[...,1:] - depth_values[...,:-1], one_e_10.expand(depth_values[...,:1].shape)), dim = -1)
-    # print("dists", dists.shape)
     alpha = 1. - torch.exp(-sigma_a * dists)       
     weights = alpha * cumprod_exclusive(1. - alpha + 1e-10)     #transmittance
     rgb_map = (weights[..., None] * rgb).sum(dim = -2)          #resultant rgb color of n depth values
     depth_map = (weights * depth_values).sum(dim = -1)
     acc_map = weights.sum(-1)
+    print("rgb_map", rgb_map.shape)
 
     return rgb_map, depth_map, acc_map
 
@@ -260,8 +260,6 @@ def render_image(model, poses, camera_info, args, i):
         points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
         # print(f'Points shape: {points.shape}, Viewdirs shape: {viewdirs.shape}')
 
-
-        
 
         input_dirs = viewdirs.unsqueeze(1).expand(points.shape)
         input_dirs = input_dirs.reshape(-1, 3)
@@ -437,23 +435,40 @@ def train(images, poses, camera_info, args):
 
     
 def test(images, poses, camera_info, args):
-    model = load_latest_model()
+    # Initialize the model
+    model = NeRFmodel()
+    model.to(device)
+    model.train()
+
+    # Initialize the optimizer
+    optimizer = torch.optim.Adam(model.parameters(), args.lrate)
+
+    # Initialize the summary writer
+    writer = SummaryWriter(args.logs_path)
+
+    # Load the checkpoint if required
+    if args.load_checkpoint:
+        load_latest_model(args.checkpoint_path, model, optimizer)
     model.eval()
 
     images = []
 
-    for i in tqdm(enumerate(np.linspace(0.0, 360, 120, endpoint=False))):
+    for i, angle in tqdm(enumerate(np.linspace(0.0, 360, 120, endpoint=False))):
         rgb_map, _ = render_image(model, poses, camera_info, args, i)
         image_values = rgb_map[..., :3]
+        image_values = image_values.reshape((8,8,3))
         image_values = image_values.permute(2, 0, 1)
 
         image = np.array(torchvision.transforms.ToPILImage()(image_values.detach().cpu()))
-        image = np.moveaxis(image, [-1], [0])
+        print("Image shape1: ", image.shape)
+        # image = np.moveaxis(image, [-1], [0])
+        # print("Image shape: ", image.shape)
+        imageio.imwrite(f"output/image_{i}.png", image)
 
         images.append(image)
 
 
-    iio.mimwrite("gif.mp4", images, fps=30, quality=7, macro_block_size=None)
+    imageio.mimwrite("gif.mp4", images, fps=30, quality=7, macro_block_size=None)
 
 
 def main(args):
@@ -474,7 +489,7 @@ def main(args):
 
 def configParser():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_path',default=".\data\lego",help="dataset path")
+    parser.add_argument('--data_path',default="./data/lego",help="dataset path")
     parser.add_argument('--mode',default='train',help="train/test/val")
     parser.add_argument('--lrate',default=5e-4,help="training learning rate")
     parser.add_argument('--n_pos_freq',default=6,help="number of positional encoding frequencies for position")
