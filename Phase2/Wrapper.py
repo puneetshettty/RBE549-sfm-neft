@@ -91,7 +91,8 @@ def loadDataset(data_path, mode):
     # TODO need to check if this is correct
 
     frames = json_data['frames']
-    images = [iio.imread(os.path.join(data_path, frame['file_path']+'.png')) for frame in frames]
+    images = np.array([np.array(iio.imread(os.path.join(data_path, frame['file_path']+'.png'))) for frame in frames])
+    images = images[...,:3]*images[...,-1:] + (1.-images[...,-1:])
     poses = np.array([np.array(frame['transform_matrix']) for frame in frames])
 
     height, width = images[0].shape[:2]
@@ -117,7 +118,6 @@ def PixelToRay(W, H, focal, pose):
     x, y = torch.meshgrid(x, y)
     x = x.transpose(-1, -2)
     y = y.transpose(-1, -2) 
-
 
     x = (x - H * 0.5) / focal
     y = (y - W * 0.5) / focal
