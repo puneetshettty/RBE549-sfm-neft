@@ -1,4 +1,5 @@
 import glob
+import cv2
 import json
 import sys, os
 import math
@@ -283,6 +284,7 @@ def loadDataset(data_path, mode):
 
     frames = json_data['frames']
     images = [iio.imread(os.path.join(data_path, frame['file_path']+'.png')) for frame in frames]
+    images = [cv2.cvtColor(image, cv2.COLOR_RGBA2RGB) for image in images ]
     poses = np.array([np.array(frame['transform_matrix']) for frame in frames])
 
     height, width = images[0].shape[:2]
