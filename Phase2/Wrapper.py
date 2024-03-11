@@ -89,13 +89,13 @@ def loadDataset(data_path, mode):
     camera_angle_x = json_data['camera_angle_x']
 
     # TODO need to check if this is correct
-    focal = 0.5 / np.tan(0.5 * camera_angle_x)
 
     frames = json_data['frames']
     images = [iio.imread(os.path.join(data_path, frame['file_path']+'.png')) for frame in frames]
     poses = np.array([np.array(frame['transform_matrix']) for frame in frames])
 
     height, width = images[0].shape[:2]
+    focal = 0.5 * width / np.tan(0.5 * camera_angle_x)
     # TODO need to check if this is correct
     camera_matrix = np.array([[focal, 0, width/2], [0, focal, height/2], [0, 0, 1]])
 
