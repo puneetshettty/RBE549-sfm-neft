@@ -288,7 +288,7 @@ def loadDataset(data_path, mode):
     height, width = images[0].shape[:2]
     focal = 0.5 * width / np.tan(0.5 * camera_angle_x)
     
-    camera_matrix = np.array([[focal, 0, width/2], [0, focal, height/2], [0, 0, 1]])
+    camera_matrix = np.array([[focal, 0, width/2], [0, focal, height/2], [0, 0, 1]], np.float32)
 
     return (width, height, camera_matrix, focal), images, poses
 
@@ -311,10 +311,10 @@ def validate(model, image, poses, camera_info, args, idx):
 def train(images, poses, camera_info, args):
     # Camera extrinsics (poses)
     tform_cam2world = poses
-    tform_cam2world = torch.from_numpy(tform_cam2world).to(device)
+    tform_cam2world = torch.from_numpy(tform_cam2world).to(device).to(torch.float32)
     # Focal length (intrinsics)
     width, height, camera_matrix, focal_length = camera_info
-    focal_length = torch.from_numpy(np.array(focal_length)).to(device)
+    focal_length = torch.from_numpy(np.array(focal_length)).to(device).to(torch.float32)
 
     # Near and far clipping thresholds for depth values.
     near_thresh = 2.
@@ -323,12 +323,12 @@ def train(images, poses, camera_info, args):
 
     # Hold one image out (for test).
     testimg, testpose = images[99], tform_cam2world[99]
-    testimg = torch.from_numpy(testimg).to(device)
+    testimg = torch.from_numpy(testimg).to(device).to(torch.float32)
     print(np.shape(images))
     images = np.array(images)
 
     # Map images to device
-    images = torch.from_numpy(images[:95, ..., :3]).to(device)
+    images = torch.from_numpy(images[:95, ..., :3]).to(device).to(torch.float32)
     print(width, height, testpose, focal_length )
 
     """
@@ -422,6 +422,7 @@ def train(images, poses, camera_info, args):
             plt.show()
 
             print('Done!')
+            del rgb_predicted, loss
 
     
 def test(images, poses, camera_info, args):

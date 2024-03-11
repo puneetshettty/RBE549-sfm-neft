@@ -377,7 +377,8 @@ def train(images, poses, camera_info, args):
         # print(f'Embedded points shape: {embedded_pts.shape}, Embedded dirs shape: {embedded_dirs.shape}')
 
         embed = torch.cat((embedded_pts, embedded_dirs), -1)
-        # print(f'Embed shape: {embed.shape}')
+        print(f'Embed shape: {embed.shape}')
+        
 
         # Generate the batch
         # print("Batch being generated")
@@ -390,14 +391,16 @@ def train(images, poses, camera_info, args):
 
         # Forward pass
         prediction = [model(batch) for batch in batches]
-        # print(f'shape of prediction: {prediction[0].shape}')
+        print(f'shape of prediction: {prediction[0].shape}')
 
         radiance_field = torch.stack(prediction, dim=0)
-        # print(f'Radiance field shape: {radiance_field.shape}')
+        print(f'Radiance field shape: {radiance_field.shape}')
         radiance_field = radiance_field.reshape(list(points.shape[:-1]) + [radiance_field.shape[-1]])
+        print(f'Radiance field shape: {radiance_field.shape}')
 
         # Render the image
         rgb_map, depth_map, acc_map = render(radiance_field, ray_direction, samples)
+        print(f'rgb field shape: {rgb_map.shape}')
 
         # Calculate the loss
         loss = loss_function(rgb_map[..., :3], target_img[..., :3]).to(device)
@@ -452,6 +455,7 @@ def test(images, poses, camera_info, args):
 
     for i, angle in tqdm(enumerate(np.linspace(0.0, 360, 120, endpoint=False))):
         rgb_map, _ = render_image(model, poses, camera_info, args, i)
+        print(f'rgb_map shape: {rgb_map}')
         image_values = rgb_map[..., :3]
         image_values = image_values.reshape((8,8,3))
         image_values = image_values.permute(2, 0, 1)
