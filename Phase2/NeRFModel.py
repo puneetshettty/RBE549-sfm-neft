@@ -6,7 +6,7 @@ import numpy as np
 class NeRFmodel(nn.Module):
     def __init__(
         self,
-        depth=8,
+        depth=3,
         width=256,
         num_encoding_fn_xyz=6,
         num_encoding_fn_dir=4,
