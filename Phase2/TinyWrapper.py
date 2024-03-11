@@ -394,7 +394,7 @@ def train(images, poses, camera_info, args):
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
-        logger.info("Loss:", loss.item())
+        logger.info("Loss:"+ str(loss.item()))
         sys.stdout.flush()
 
         # Display images/plots/stats
