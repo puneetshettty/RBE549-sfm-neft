@@ -222,7 +222,7 @@ def get_minibatches(inputs, chunksize):
 # One iteration of TinyNeRF (forward pass).
 def run_one_iter_of_tinynerf(height, width, focal_length, tform_cam2world,
                              near_thresh, far_thresh, depth_samples_per_ray,
-                             encoding_function, get_minibatches_function):
+                             encoding_function, get_minibatches_function, model):
   
     # Get the "bundle" of rays through all image pixels.
     ray_origins, ray_directions = get_ray_bundle(height, width, focal_length,
@@ -241,15 +241,17 @@ def run_one_iter_of_tinynerf(height, width, focal_length, tform_cam2world,
 
     # Split the encoded points into "chunks", run the model on all chunks, and
     # concatenate the results (to avoid out-of-memory issues).
-    batches = get_minibatches_function(encoded_points, chunksize=chunksize)
+    batches = get_minibatches_function(encoded_points, chunksize=1024)
     predictions = []
     for batch in batches:
+        batch = batch.to(torch.float32)
         predictions.append(model(batch))
     radiance_field_flattened = torch.cat(predictions, dim=0)
 
     # "Unflatten" to obtain the radiance field.
     unflattened_shape = list(query_points.shape[:-1]) + [4]
     radiance_field = torch.reshape(radiance_field_flattened, unflattened_shape)
+    print(torch.cuda.mem_get_info())
 
     # Perform differentiable volume rendering to re-synthesize the RGB image.
     rgb_predicted, _, _ = render_volume_density(radiance_field, ray_origins, depth_values)
@@ -339,12 +341,12 @@ def train(images, poses, camera_info, args):
     # Specify encoding function.
     encode = lambda x: positional_encoding(x, num_encoding_functions=num_encoding_functions)
     # Number of depth samples along each ray.
-    depth_samples_per_ray = 32
+    depth_samples_per_ray = 8
 
     # Chunksize (Note: this isn't batchsize in the conventional sense. This only
     # specifies the number of rays to be queried in one go. Backprop still happens
     # only after all rays from the current "bundle" are queried and rendered).
-    chunksize = 1024  # Use chunksize of about 4096 to fit in ~1.4 GB of GPU memory.
+    chunksize = 8  # Use chunksize of about 4096 to fit in ~1.4 GB of GPU memory.
 
     # Optimizer parameters
     lr = 5e-3
@@ -388,7 +390,7 @@ def train(images, poses, camera_info, args):
         rgb_predicted = run_one_iter_of_tinynerf(height, width, focal_length,
                                                 target_tform_cam2world, near_thresh,
                                                 far_thresh, depth_samples_per_ray,
-                                                encode, get_minibatches)
+                                                encode, get_minibatches, model)
 
         # Compute mean-squared error between the predicted and target images. Backprop!
         loss = torch.nn.functional.mse_loss(rgb_predicted, target_img)
@@ -402,7 +404,7 @@ def train(images, poses, camera_info, args):
             rgb_predicted = run_one_iter_of_tinynerf(height, width, focal_length,
                                                     testpose, near_thresh,
                                                     far_thresh, depth_samples_per_ray,
-                                                    encode, get_minibatches)
+                                                    encode, get_minibatches, model)
             loss = torch.nn.functional.mse_loss(rgb_predicted, target_img)
             print("Loss:", loss.item())
             psnr = -10. * torch.log10(loss)
