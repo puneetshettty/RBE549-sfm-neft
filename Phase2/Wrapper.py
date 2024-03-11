@@ -415,7 +415,7 @@ def train(images, poses, camera_info, args):
             }, checkpoint_save_name)
             
         if i % 100 == 0:
-            rgb_map, _ = render_image(model, poses, camera_info, args, i)
+            rgb_map, _ = render_image(model, poses, camera_info, args, 0)
             image_values = rgb_map[..., :3]
             image_values = image_values.reshape((8,8,3))
             image_values = image_values.permute(2, 0, 1)
