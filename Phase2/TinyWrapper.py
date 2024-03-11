@@ -251,7 +251,7 @@ def run_one_iter_of_tinynerf(height, width, focal_length, tform_cam2world,
     # "Unflatten" to obtain the radiance field.
     unflattened_shape = list(query_points.shape[:-1]) + [4]
     radiance_field = torch.reshape(radiance_field_flattened, unflattened_shape)
-    print(torch.cuda.mem_get_info())
+    logger.info(str(torch.cuda.mem_get_info()))
 
     # Perform differentiable volume rendering to re-synthesize the RGB image.
     rgb_predicted, _, _ = render_volume_density(radiance_field, ray_origins, depth_values)
@@ -319,17 +319,14 @@ def train(images, poses, camera_info, args):
     # Near and far clipping thresholds for depth values.
     near_thresh = 2.
     far_thresh = 6.
-    print(images.__len__())
 
     # Hold one image out (for test).
     testimg, testpose = images[99], tform_cam2world[99]
     testimg = torch.from_numpy(testimg).to(device).to(torch.float32)
-    print(np.shape(images))
     images = np.array(images)
 
     # Map images to device
     images = torch.from_numpy(images[:95, ..., :3]).to(device).to(torch.float32)
-    print(width, height, testpose, focal_length )
 
     """
     Parameters for TinyNeRF training
@@ -397,6 +394,8 @@ def train(images, poses, camera_info, args):
         loss.backward()
         optimizer.step()
         optimizer.zero_grad()
+        logger.info("Loss:", loss.item())
+        sys.stdout.flush()
 
         # Display images/plots/stats
         if i % display_every == 0:
@@ -419,7 +418,15 @@ def train(images, poses, camera_info, args):
             plt.subplot(122)
             plt.plot(iternums, psnrs)
             plt.title("PSNR")
-            plt.show()
+            plt.savefig("img_iter_" + str(i) + ".png")
+
+            checkpoint_save_name =  'checkpoints' + os.sep + 'model_' + str(i) + '.ckpt'
+            torch.save({
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'loss': loss,
+            }, checkpoint_save_name)
+        
 
             print('Done!')
             del rgb_predicted, loss
