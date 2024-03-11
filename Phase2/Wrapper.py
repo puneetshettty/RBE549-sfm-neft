@@ -204,7 +204,6 @@ def render(radiance_field, ray_directions, depth_values):
     rgb_map = (weights[..., None] * rgb).sum(dim = -2)          #resultant rgb color of n depth values
     depth_map = (weights * depth_values).sum(dim = -1)
     acc_map = weights.sum(-1)
-    print("rgb_map", rgb_map.shape)
 
     return rgb_map, depth_map, acc_map
 
