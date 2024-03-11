@@ -278,8 +278,6 @@ def render_image(model, poses, camera_info, args, i):
         # print(f'number of batches: {len(batches)}')
 
 
-
-
         # Forward pass
         prediction = [model(batch) for batch in batches]
         # print(f'shape of prediction: {prediction[0].shape}')
@@ -314,7 +312,7 @@ def train(images, poses, camera_info, args):
     model.to(device)
     model.train()
 
-    # Initialize the optimizer
+    # Initialize the optimize3r
     optimizer = torch.optim.Adam(model.parameters(), args.lrate)
 
     # Initialize the summary writer

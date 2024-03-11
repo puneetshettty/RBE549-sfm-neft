@@ -6,3 +6,11 @@ Phase1/ransac_results
 
 
 Phase2/data
+Phase2/checkpoints
+Phase2/checkpoints_2
+Phase2/logs
+Phase2/logs2
+Phase2/output
+venv2
+logs
+*.mp4
