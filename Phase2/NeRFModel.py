@@ -47,7 +47,7 @@ class NeRFmodel(nn.Module):
                 x = self.layers_xyz[i](x)
             x = self.relu(x)
         feat = self.fc_feat(x)
-        alpha = self.fc_alpha(feat)
+        alpha = self.relu(self.fc_alpha(feat))
         x = self.layers_dir[0](torch.cat((feat, dirs), -1))
         x = self.relu(x)
         for i in range(1, 3):

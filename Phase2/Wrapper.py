@@ -194,12 +194,15 @@ def render(radiance_field, ray_directions, depth_values):
         depth_map: depth map
         acc_map: accumulated map
     """
+    # print("weights shape: ", radiance_field.shape)
     sigma_a = F.relu(radiance_field[...,3])       #volume density
+    # print("weights: ", sigma_a)
+    # print("weights shape: ", sigma_a.shape)
     rgb = torch.sigmoid(radiance_field[...,:3])    #color value at nth depth value
     one_e_10 = torch.tensor([1e10], dtype = ray_directions.dtype, device = ray_directions.device)
     # print("one_e_10", one_e_10.shape)
     dists = torch.cat((depth_values[...,1:] - depth_values[...,:-1], one_e_10.expand(depth_values[...,:1].shape)), dim = -1)
-    alpha = 1. - torch.exp(-sigma_a * dists)       
+    alpha = 1. - torch.exp(-sigma_a * dists)      
     weights = alpha * cumprod_exclusive(1. - alpha + 1e-10)     #transmittance
     rgb_map = (weights[..., None] * rgb).sum(dim = -2)          #resultant rgb color of n depth values
     depth_map = (weights * depth_values).sum(dim = -1)
@@ -364,8 +367,6 @@ def train(images, poses, camera_info, args):
         # Sample the points
         points, samples = SamplePoints(ray_origin, ray_direction, 2, 6, args.n_sample)
         # print(f'Points shape: {points.shape}, Viewdirs shape: {viewdirs.shape}')
-
-
         
 
         input_dirs = viewdirs.unsqueeze(1).expand(points.shape)
@@ -387,13 +388,17 @@ def train(images, poses, camera_info, args):
 
         # Forward pass
         prediction = [model(batch) for batch in batches]
+        # print("pred: ", prediction)
 
         radiance_field = torch.stack(prediction, dim=0)
         radiance_field = radiance_field.reshape(list(points.shape[:-1]) + [radiance_field.shape[-1]])
 
+        # print("pred: ", radiance_field)
+
         # Render the image
         rgb_map, depth_map, acc_map = render(radiance_field, ray_direction, samples)
 
+        # print(radiance_field)
         # Calculate the loss
         loss = loss_function(rgb_map[..., :3], target_img[..., :3]).to(device)
 
